@@ -1,20 +1,11 @@
 #!/bin/bash
 
-## 202501061829
-# This version of the probe_nodes.sh script uses a simple average of the BH
-# of all the seed and connected nodes. If local node is 50 blocks or less 
-# behind the average, then the node is considered "on_chain"
-
-## 202501061919
-# This version will start work on adding 'version' to the log file.
-
-## 2025012414
-# This version seems to have a good working BH average calculation. It is combined with 
-# a banned node list if a single node is outside of the threshold. The threshold is set to 10000
+# MIT License
+# See LICENSE file in the root of the repository for details.
 
 # Configuration parameters
 # Note: Not all parameters are necessary to configure for your particular email setup.
-# Leave blank ("") any parameters that are not to be passed to the MTA.
+# Leave blank ("") any MSMTP parameters that are not to be passed to the MTA.
 CONFIG_DIR="$HOME/probe_nodes"
 LOG_FILE="$CONFIG_DIR/probe_nodes.log"
 TEMP_LOG_FILE="$CONFIG_DIR/probe_nodes_temp.log"
@@ -25,16 +16,14 @@ THRESHOLD=3
 THRESHOLD_COUNT_FILE="$CONFIG_DIR/threshold_count.txt"
 BAN_LIST_FILE="$CONFIG_DIR/ban_list.txt"
 BAN_THRESHOLD=10000  # Number of blocks behind to consider banning
-SMTP_HOST="10.168.32.63"
-SMTP_PORT=25
-SENDER_DOMAIN="dennen.us"
-RECIPIENT_EMAIL="pocket_node_alert@dennen.com"
-MSMTP_ACCOUNT="pocketnet-node12"
-MSMTP_FROM="pocketnet-node12.12project@dennen.us"
-MSMTP_USER=""
-MSMTP_PASSWORD=""
-MSMTP_TLS="false"
-MSMTP_AUTH="false"
+SMTP_HOST="smtp.example.com"
+SMTP_PORT=587
+RECIPIENT_EMAIL="alert@example.com"
+MSMTP_FROM="node@example.com"
+MSMTP_USER="your_email@example.com"
+MSMTP_PASSWORD="your_password"
+MSMTP_TLS=true
+MSMTP_AUTH=true
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
@@ -112,7 +101,7 @@ send_email() {
         msmtp_command="$msmtp_command --auth=on"
     fi
     
-    echo -e "From: $hostname@$SENDER_DOMAIN\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
+    echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
 # Function to update the ban list
