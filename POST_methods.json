@@ -1,0 +1,25 @@
+Here's a few post request examples I have saved:
+
+{
+    "method":"getnodeinfo",
+    "params":[],
+    "id":""
+}
+
+
+{
+    "method":"getpeerinfo",
+    "params":[],
+    "id":""
+}
+
+
+{
+    "method":"getlastblocks",
+    "params":[
+        1,
+        -1,
+        false
+    ],
+    "id":"123"
+}
