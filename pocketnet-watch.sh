@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Function to get address groupings
-get_address_groupings() {
-    pocketcoin-cli listaddressgroupings | jq -r '.[0][0][0]'
+# Function to get address groupings and capture the wallet address with the highest balance
+get_highest_balance_address() {
+    pocketcoin-cli listaddressgroupings | jq -r '.[0] | max_by(.[1]) | .[0]'
 }
 
 # Function to get wallet info
@@ -59,7 +59,7 @@ get_debug_log() {
 display_metrics() {
     tput civis # Hide the cursor trap 'tput cnorm; exit' INT TERM # Show the cursor on exit
     printf "%-32s\n" "$(date +"%a %Y-%m-%d %H:%M:%S %Z")"
-    printf "%-32s\n" "Wallet Address: $(get_address_groupings)"
+    printf "%-32s\n" "Wallet Address: $(get_highest_balance_address)"
     printf "%-32s | %-32s | %-32s\n" "Wallet Balance: $(get_wallet_info)" "Version: $(pocketcoin-cli -getinfo | jq -r '.version')" "Connections: $(pocketcoin-cli -getinfo | jq -r '.connections.total')"
     printf "%-32s | %-32s | %-32s\n" "Blocks: $(pocketcoin-cli -getinfo | jq -r '.blocks')" "Difficulty: $(pocketcoin-cli -getinfo | jq -r '.difficulty')" "Stake Time: $(get_stake_time)"
     printf "%-32s | %-32s\n" "Netstakeweight: $(pocketcoin-cli getstakinginfo | jq -r '.netstakeweight')" "Expectedtime: $(pocketcoin-cli getstakinginfo | jq -r '.expectedtime')"
@@ -75,8 +75,14 @@ display_metrics() {
 
 # Main loop
 clear
+counter=0
 while true; do
     tput cup 0 0
     display_metrics
     sleep 5
+    counter=$((counter + 1))
+    if [ $counter -eq 15 ]; then
+        clear
+        counter=0
+    fi
 done
