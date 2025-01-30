@@ -206,6 +206,12 @@ main() {
         threshold_count=$(cat "$THRESHOLD_COUNT_FILE")
     fi
 
+    # Read the previous node online status
+    previous_node_online=true
+    if [ -f "$CONFIG_DIR/previous_node_online.txt" ]; then
+        previous_node_online=$(cat "$CONFIG_DIR/previous_node_online.txt")
+    fi
+
     # Increment threshold count if node is offline
     if [ "$node_online" = false ]; then
         threshold_count=$((threshold_count + 1))
@@ -214,7 +220,18 @@ main() {
         # Reset threshold count if node is back online
         threshold_count=0
         echo "$threshold_count" > "$THRESHOLD_COUNT_FILE"
+        
+        # Send email if node has come back online
+        if [ "$previous_node_online" = false ]; then
+            local subject="Pocketnet Node Status - Node is back ONLINE"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nAverage Block Height: $average_bh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
+            send_email "$subject" "$body"
+            echo "$timestamp Email Sent: $subject" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
+        fi
     fi
+
+    # Save the current node online status for the next run
+    echo "$node_online" > "$CONFIG_DIR/previous_node_online.txt"
 
     # Send email if threshold is exceeded
     if [ "$threshold_count" -ge "$THRESHOLD" ]; then
