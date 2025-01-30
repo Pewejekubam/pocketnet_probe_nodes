@@ -16,6 +16,9 @@ THRESHOLD=3
 THRESHOLD_COUNT_FILE="$CONFIG_DIR/threshold_count.txt"
 BAN_LIST_FILE="$CONFIG_DIR/ban_list.txt"
 BAN_THRESHOLD=10000  # Number of blocks behind to consider banning
+# Custom arguments for pocketcoin-cli
+# Note: This can be an empty string if no custom arguments are needed.
+POCKETCOIN_CLI_ARGS="-rpcport=67530 -conf=/path/to/pocketnet/pocketcoin.conf"
 SMTP_HOST="smtp.example.com"
 SMTP_PORT=587
 RECIPIENT_EMAIL="alert@example.com"
@@ -24,6 +27,7 @@ MSMTP_USER="your_email@example.com"
 MSMTP_PASSWORD="your_password"
 MSMTP_TLS=true
 MSMTP_AUTH=true
+
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
@@ -50,7 +54,7 @@ get_node_info() {
 
 # Function to get connected nodes' IP addresses and block heights
 get_connected_nodes() {
-    local peer_info=$(pocketcoin-cli getpeerinfo)
+    local peer_info=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo)
     local peer_ips=$(echo "$peer_info" | jq -r '.[].addr' | cut -d':' -f1)
     local connected_heights=()
     for ip in $peer_ips; do
@@ -165,7 +169,7 @@ main() {
     # Get local node block height
     local local_height
     local node_online=true
-    if ! local_height=$(pocketcoin-cli getblockcount 2>/dev/null); then
+    if ! local_height=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getblockcount 2>/dev/null); then
         node_online=false
         local_height="unknown"
     else
@@ -175,7 +179,7 @@ main() {
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
 
     # Get peer count
-    local peer_count=$(pocketcoin-cli getpeerinfo | jq -r 'length')
+    local peer_count=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo | jq -r 'length')
 
     # Log local node information
     echo "$timestamp origin: local_node hostname: $(hostname) block_height: $local_height" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
