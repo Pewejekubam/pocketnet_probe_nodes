@@ -1,89 +1,114 @@
+
 ```markdown
-### Description
+# Pocketnet Node Monitoring Script
 
-The `probe_nodes.sh` script is designed to monitor the status of a Pocketnet node by performing the following tasks:
+## Overview
+This script monitors Pocketnet nodes and sends alerts via email when certain conditions are met. It retrieves seed node IP addresses, checks block heights, and determines the majority block height (MBH). The script can also send test emails to verify email configuration.
 
-1. Fetch Seed Node IP Addresses:
-   - Retrieves a list of seed node IP addresses from a specified URL and saves them to a file.
+## Prerequisites
+- `jq` (for processing JSON)
+- `curl` (for making HTTP requests)
+- `msmtp` (for sending emails)
 
-2. Get Block Heights and Versions:
-   - For each seed node and connected node, the script queries the node to get its current block height and version.
-   - Logs the block height and version information to a log file.
+## Configuration
+Create a `probe_nodes_conf.json` configuration file with the following parameters:
 
-3. Calculate Average Block Height:
-   - Calculates the average block height from the collected block heights of seed and connected nodes.
+```json
+{
+    "CONFIG_DIR": "/home/pocketnet/probe_nodes",
+    "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
+    "MAX_ALERTS": 3,
+    "THRESHOLD": 3,
+    "POCKETCOIN_CLI_ARGS": "",
+    "SMTP_HOST": "smtp.example.com",
+    "SMTP_PORT": 587,
+    "RECIPIENT_EMAIL": "alert@example.com",
+    "MSMTP_FROM": "node@example.com",
+    "MSMTP_USER": "your_email@example.com",
+    "MSMTP_PASSWORD": "your_password",
+    "MSMTP_TLS": true,
+    "MSMTP_AUTH": false,
+    "EMAIL_TESTING": false
+}
+```
+Certainly! Here is the expanded description of each parameter in the `probe_nodes_conf.json` file:
 
-4. Identify and Ban Outdated Nodes:
-   - Identifies nodes that are significantly behind the average block height (more than a specified threshold).
-   - Adds these nodes to a ban list to prevent them from affecting the network.
-
-5. Monitor Local Node Status:
-   - Queries the local node to get its current block height and peer count.
-   - Logs the local node's block height, peer count, and online status.
-
-6. Check On-Chain Condition:
-   - Determines if the local node is "on-chain" by checking if its block height is within a specified range of the average block height.
-
-7. Send Alerts:
-   - Sends email alerts if the local node is offline or significantly behind the average block height.
-   - Limits the number of alerts sent to avoid spamming.
-
-8. Log Information:
-   - Logs all relevant information, including block heights, on-chain status, node online status, and peer count, to a log file for monitoring and troubleshooting.
-
-The script is intended to be run periodically (e.g., every 10 minutes) using a cron job to ensure continuous monitoring of the Pocketnet node's status.
-
-### Configuration
-
-Before running the script, you need to modify the configuration parameters block to match your environment. This includes setting the appropriate values for the `msmtp` parameters used for sending email alerts.
-
-Here is the configuration block you need to modify:
-
-```bash
-# Configuration parameters
-# Note: Not all parameters are necessary to configure for your particular email setup.
-# Leave blank ("") any parameters that are not to be passed to the MTA.
-CONFIG_DIR="$HOME/probe_nodes"
-LOG_FILE="$CONFIG_DIR/probe_nodes.log"
-TEMP_LOG_FILE="$CONFIG_DIR/probe_nodes_temp.log"
-SEED_NODES_URL="https://example.com/seeds/nodes_main.txt"
-MAX_ALERTS=3
-ALERT_COUNT_FILE="$CONFIG_DIR/alert_count.txt"
-THRESHOLD=3
-THRESHOLD_COUNT_FILE="$CONFIG_DIR/threshold_count.txt"
-BAN_LIST_FILE="$CONFIG_DIR/ban_list.txt"
-BAN_THRESHOLD=10000  # Number of blocks behind to consider banning
-SMTP_HOST="smtp.example.com"
-SMTP_PORT=587
-SENDER_DOMAIN="example.com"
-RECIPIENT_EMAIL="alert@example.com"
-MSMTP_FROM="node@example.com"
-MSMTP_USER="your_email@example.com"
-MSMTP_PASSWORD="your_password"
-MSMTP_TLS=true
-MSMTP_AUTH=true
+```json
+{
+    "CONFIG_DIR": "/home/pocketnet/probe_nodes",
+    "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
+    "MAX_ALERTS": 3,
+    "THRESHOLD": 3,
+    "POCKETCOIN_CLI_ARGS": "",
+    "SMTP_HOST": "smtp.example.com",
+    "SMTP_PORT": 587,
+    "RECIPIENT_EMAIL": "alert@example.com",
+    "MSMTP_FROM": "node@example.com",
+    "MSMTP_USER": "your_email@example.com",
+    "MSMTP_PASSWORD": "your_password",
+    "MSMTP_TLS": true,
+    "MSMTP_AUTH": false,
+    "EMAIL_TESTING": false
+}
 ```
 
-Make sure to update the following parameters to match your environment:
-- `CONFIG_DIR`: Directory where logs and temporary files will be stored.
-- `SEED_NODES_URL`: URL to fetch the list of seed node IP addresses.
-- `SMTP_HOST`: SMTP server host for sending email alerts.
-- `SMTP_PORT`: SMTP server port.
-- `SENDER_DOMAIN`: Domain for the sender email address.
-- `RECIPIENT_EMAIL`: Email address to receive alerts.
-- `MSMTP_FROM`: Sender email address for `msmtp`.
-- `MSMTP_USER`: Username for SMTP authentication.
-- `MSMTP_PASSWORD`: Password for SMTP authentication.
-- `MSMTP_TLS`: Boolean to enable/disable TLS.
-- `MSMTP_AUTH`: Boolean to enable/disable authentication.
+### Parameter Descriptions
 
-### Requirements
+1. **CONFIG_DIR**: The directory where the script will store log files, runtime files, and other necessary data.
 
-This script requires `msmtp` to send email alerts. You can install `msmtp` using your package manager. For example, on Debian-based systems, you can install it with:
+2. **SEED_NODES_URL**: The URL to retrieve the list of seed node IP addresses.
 
-```bash
-sudo apt-get install msmtp
-```
+3. **MAX_ALERTS**: The maximum number of alert emails that the script will send if a node is offline or off-chain. This helps prevent flooding the recipient with too many emails in case of persistent issues.
 
-After updating the configuration parameters and installing `msmtp`, you can run the script to monitor your Pocketnet node.
+4. **THRESHOLD**: The number of consecutive times the script detects that the node is offline or off-chain before it sends an alert email. This helps to avoid false positives due to transient network issues.
+
+5. **POCKETCOIN_CLI_ARGS**: The command-line arguments to pass to the `pocketcoin-cli` command. This can be useful for specifying additional parameters or options when interacting with the Pocketnet node.
+
+6. **SMTP_HOST**: The hostname or IP address of the SMTP server used to send alert emails. This should be configured to match your email provider's SMTP server.
+
+7. **SMTP_PORT**: The port number to connect to the SMTP server. Common port numbers are 25, 465 (SSL), and 587 (TLS).
+
+8. **RECIPIENT_EMAIL**: The email address where the alert notifications will be sent. This should be a valid email address that you or the intended recipient can monitor.
+
+9. **MSMTP_FROM**: The email address that appears as the sender of the alert emails. This should be a valid email address that is recognized by the SMTP server.
+
+10. **MSMTP_USER**: The username for authenticating with the SMTP server. This is typically the same as the email address used to send the emails.
+
+11. **MSMTP_PASSWORD**: The password for authenticating with the SMTP server. Ensure this is handled securely to prevent unauthorized access.
+
+12. **MSMTP_TLS**: A boolean value indicating whether to use TLS (Transport Layer Security) for secure communication with the SMTP server. Set to `true` to enable TLS.
+
+13. **MSMTP_AUTH**: A boolean value indicating whether to use authentication when connecting to the SMTP server. Set to `true` to enable authentication.
+
+14. **EMAIL_TESTING**: A boolean value indicating whether to send a test email to verify the email configuration. Set to `true` to send a test email; the script will exit after sending the test email.
+
+
+## Usage
+1. Ensure the `probe_nodes_conf.json` configuration file is in the same directory as the script.
+2. Make the script executable:
+    ```bash
+    chmod +x your_script.sh
+    ```
+3. Run the script:
+    ```bash
+    ./probe_nodes.sh
+    ```
+
+## Functions
+- **get_seed_ips()**: Retrieves seed IP addresses.
+- **get_node_info(node_ip)**: Gets block height and version from a node.
+- **update_frequency_map(origin, freq_map, node_ips)**: Updates frequency map with block heights.
+- **determine_mbh(freq_map)**: Determines the Majority Block Height (MBH).
+- **send_email(subject, body)**: Sends an email notification.
+- **main()**: Main function to run the script.
+
+## Logging
+Logs are stored in the `probe_nodes.log` file within the `CONFIG_DIR` directory. Logs include timestamps, IP addresses, block heights, and any errors encountered during execution.
+
+## Error Handling
+The script ensures that required parameters are present in the configuration file and checks the validity of the JSON format. If any issues are encountered, appropriate error messages are logged, and the script exits.
+
+
+## License
+This project is licensed under the MIT License. See the LICENSE file for details.
 ```

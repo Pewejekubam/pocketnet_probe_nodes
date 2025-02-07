@@ -3,83 +3,120 @@
 # MIT License
 # See LICENSE file in the root of the repository for details.
 
-# Configuration parameters
-# Note: Not all parameters are necessary to configure for your particular email setup.
-# Leave blank ("") any MSMTP parameters that are not to be passed to the MTA.
-CONFIG_DIR="$HOME/probe_nodes"
-LOG_FILE="$CONFIG_DIR/probe_nodes.log"
-TEMP_LOG_FILE="$CONFIG_DIR/probe_nodes_temp.log"
-SEED_NODES_URL="https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt"
-MAX_ALERTS=3
-ALERT_COUNT_FILE="$CONFIG_DIR/alert_count.txt"
-THRESHOLD=3
-THRESHOLD_COUNT_FILE="$CONFIG_DIR/threshold_count.txt"
-BAN_LIST_FILE="$CONFIG_DIR/ban_list.txt"
-BAN_THRESHOLD=10000  # Number of blocks behind to consider banning
-# Custom arguments for pocketcoin-cli
-# Note: This can be an empty string if no custom arguments are needed.
-POCKETCOIN_CLI_ARGS="-rpcport=67530 -conf=/path/to/pocketnet/pocketcoin.conf"
-SMTP_HOST="smtp.example.com"
-SMTP_PORT=587
-RECIPIENT_EMAIL="alert@example.com"
-MSMTP_FROM="node@example.com"
-MSMTP_USER="your_email@example.com"
-MSMTP_PASSWORD="your_password"
-MSMTP_TLS=true
-MSMTP_AUTH=true
+# Read configuration parameters from JSON file
+CONFIG_FILE="probe_nodes_conf.json"
 
+# Ensure the configuration file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - Configuration file not found: $CONFIG_FILE"
+    exit 1
+fi
+
+# Validate the configuration file format
+if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - Invalid JSON format in configuration file: $CONFIG_FILE"
+    exit 1
+fi
+
+# Read configuration parameters from JSON file
+CONFIG_DIR=$(jq -r '.CONFIG_DIR' "$CONFIG_FILE")
+LOG_FILE="$CONFIG_DIR/probe_nodes.log"
+RUNTIME_FILE="$CONFIG_DIR/probe_nodes_runtime.json"
+SEED_NODES_URL=$(jq -r '.SEED_NODES_URL' "$CONFIG_FILE")
+MAX_ALERTS=$(jq -r '.MAX_ALERTS' "$CONFIG_FILE")
+ALERT_COUNT_FILE="$CONFIG_DIR/alert_count.txt"
+THRESHOLD=$(jq -r '.THRESHOLD' "$CONFIG_FILE")
+POCKETCOIN_CLI_ARGS=$(jq -r '.POCKETCOIN_CLI_ARGS' "$CONFIG_FILE")
+SMTP_HOST=$(jq -r '.SMTP_HOST' "$CONFIG_FILE")
+SMTP_PORT=$(jq -r '.SMTP_PORT' "$CONFIG_FILE")
+RECIPIENT_EMAIL=$(jq -r '.RECIPIENT_EMAIL' "$CONFIG_FILE")
+MSMTP_FROM=$(jq -r '.MSMTP_FROM' "$CONFIG_FILE")
+MSMTP_USER=$(jq -r '.MSMTP_USER' "$CONFIG_FILE")
+MSMTP_PASSWORD=$(jq -r '.MSMTP_PASSWORD' "$CONFIG_FILE")
+MSMTP_TLS=$(jq -r '.MSMTP_TLS' "$CONFIG_FILE")
+MSMTP_AUTH=$(jq -r '.MSMTP_AUTH' "$CONFIG_FILE")
+EMAIL_TESTING=$(jq -r '.EMAIL_TESTING' "$CONFIG_FILE")
+
+# Ensure the runtime file exists
+if [ ! -f "$RUNTIME_FILE" ]; then
+    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "threshold_count": 0, "previous_node_online": true}' > "$RUNTIME_FILE"
+fi
+
+# Function to check if a required parameter is missing
+check_required_param() {
+    local param_name=$1
+    if ! jq -e ". | has(\"$param_name\")" "$CONFIG_FILE" > /dev/null; then
+        echo "$(date +"%Y-%m-%d %H:%M:%S") - Missing required parameter in configuration file: $param_name" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+}
+
+# Check required parameters
+check_required_param "CONFIG_DIR"
+check_required_param "SEED_NODES_URL"
+check_required_param "MAX_ALERTS"
+check_required_param "THRESHOLD"
+check_required_param "POCKETCOIN_CLI_ARGS"
+check_required_param "SMTP_HOST"
+check_required_param "SMTP_PORT"
+check_required_param "RECIPIENT_EMAIL"
+check_required_param "MSMTP_FROM"
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
 
 # Function to get the seed IP addresses
 get_seed_ips() {
-    curl -s $SEED_NODES_URL | grep -oP '^[^:]+' > "$CONFIG_DIR/seed_ips.txt"
+    curl -s $SEED_NODES_URL | grep -oP '^[^:]+' 
 }
 
 # Function to get block height and version from a node with a timeout of 1 second
 get_node_info() {
     local node_ip=$1
-    local origin=$2
     local url="http://$node_ip:38081"
     local response=$(curl -s --max-time 1 -X POST -H "Content-Type: application/json" -d '{"method": "getnodeinfo", "params": [], "id": ""}' $url 2>/dev/null)
     local block_height=$(echo $response | jq -r '.result.lastblock.height' 2>/dev/null)
     local version=$(echo $response | jq -r '.result.version' 2>/dev/null)
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     if [ -n "$block_height" ]; then
-        local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-        echo "$timestamp origin: $origin ip: $node_ip block_height: $block_height version: $version" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
+        echo "$timestamp ip: $node_ip block_height: $block_height version: $version" >> "$LOG_FILE"
         echo "$block_height"
+    else
+        echo "$timestamp ip: $node_ip - Unreachable or no response within 1 second" >> "$LOG_FILE"
     fi
 }
 
-# Function to get connected nodes' IP addresses and block heights
-get_connected_nodes() {
-    local peer_info=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo)
-    local peer_ips=$(echo "$peer_info" | jq -r '.[].addr' | cut -d':' -f1)
-    local connected_heights=()
-    for ip in $peer_ips; do
-        local block_height=$(get_node_info "$ip" "locally_connected_node")
+# Function to update frequency map with block heights from nodes
+update_frequency_map() {
+    local origin=$1
+    shift
+    local -n freq_map=$1
+    shift
+    local node_ips=("$@")
+    for node_ip in "${node_ips[@]}"; do
+        local block_height=$(get_node_info "$node_ip" "$origin")
         if [ -n "$block_height" ]; then
-            connected_heights+=("$block_height")
+            ((freq_map[$block_height]++))
         fi
     done
-    echo "${connected_heights[@]}"
 }
 
-# Function to calculate the average block height (BH) from the sample
-calculate_average_bh() {
-    local heights=("$@")
-    local sum=0
-    local count=${#heights[@]}
-    for height in "${heights[@]}"; do
-        sum=$((sum + height))
+# Function to determine the Majority Block Height (MBH)
+determine_mbh() {
+    local -n freq_map=$1
+    local max_count=0
+    local mbh=0
+    for height in "${!freq_map[@]}"; do
+        if (( freq_map[$height] > max_count )); then
+            max_count=${freq_map[$height]}
+            mbh=$height
+        elif (( freq_map[$height] == max_count )); then
+            if (( height < mbh )); then
+                mbh=$height
+            fi
+        fi
     done
-    if [ $count -gt 0 ]; then
-        local average_bh=$((sum / count))
-    else
-        local average_bh=0
-    fi
-    echo "$average_bh"
+    echo "$mbh"
 }
 
 # Function to send email
@@ -87,7 +124,7 @@ send_email() {
     local subject=$1
     local body=$2
     local hostname=$(hostname)
-    local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM"
+    local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
     
     if [ -n "$MSMTP_USER" ]; then
         msmtp_command="$msmtp_command --user=$MSMTP_USER"
@@ -108,63 +145,51 @@ send_email() {
     echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
-# Function to update the ban list
-update_ban_list() {
-    local node_ip=$1
-    local current_ban_list=()
-    
-    # Read the current ban list into an array
-    if [ -f "$BAN_LIST_FILE" ]; then
-        while IFS= read -r ip; do
-            current_ban_list+=("$ip")
-        done < "$BAN_LIST_FILE"
-    fi
-    
-    # Check if the IP is already in the ban list
-    if [[ ! " ${current_ban_list[@]} " =~ " ${node_ip} " ]]; then
-        echo "$node_ip" >> "$BAN_LIST_FILE"
-    fi
-}
-
 # Main function to run the script
 main() {
     local hostname=$(hostname)
 
+    # Check if email testing is enabled
+    if [ "$EMAIL_TESTING" = true ]; then
+        local subject="Test Email from Pocketnet Node"
+        local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
+        echo -e "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\n"
+        echo -e "Subject: $subject\n"
+        echo -e "Body:\n$body\n"
+        send_email "$subject" "$body"
+        exit 0
+    fi
+
     # Get seed IP addresses
-    get_seed_ips
+    seed_node_ips=($(get_seed_ips))
 
-    # Read all seed node IP addresses from the list
-    local seed_heights=()
-    while IFS= read -r node_ip; do
-        # Get block height from each seed node
-        local block_height=$(get_node_info "$node_ip" "seed_node")
-        if [ -n "$block_height" ]; then
-            seed_heights+=("$block_height")
-        fi
-    done < "$CONFIG_DIR/seed_ips.txt"
+    # Check if the seed IPs array is empty
+    if [ ${#seed_node_ips[@]} -eq 0 ]; then
+        # Log the message
+        echo "$(date +"%Y-%m-%d %H:%M:%S") - No seed nodes retrieved. The seed IPs array is empty." >> "$LOG_FILE"
 
-    # Get connected nodes' block heights
-    local connected_heights=($(get_connected_nodes))
+        # Notify the user via email
+        send_email "Seed Node Retrieval Alert" "No seed nodes retrieved. The seed IPs array is empty."
 
-    # Combine seed and connected heights
-    all_heights=("${seed_heights[@]}" "${connected_heights[@]}")
+        # Decide whether to exit or continue
+        # exit 1
+    fi
 
-    # Calculate the average block height (BH) from the sample
-    average_bh=$(calculate_average_bh "${all_heights[@]}")
+    # Initialize frequency map
+    declare -A frequency_map
 
-    # Identify and ban nodes significantly behind the average
-    local valid_heights=()
-    for height in "${all_heights[@]}"; do
-        if (( height < average_bh - BAN_THRESHOLD )); then
-            local node_ip=$(grep "block_height: $height" "$TEMP_LOG_FILE" | awk -F 'ip: ' '{print $2}' | awk '{print $1}')
-            update_ban_list "$node_ip"
-        else
-            valid_heights+=("$height")
-        fi
-    done
+    # Update frequency map with block heights from seed nodes
+    update_frequency_map "seed_node" frequency_map "${seed_node_ips[@]}"
 
-    # Recalculate the average block height (BH) after excluding banned nodes
-    average_bh=$(calculate_average_bh "${valid_heights[@]}")
+    # Get connected nodes' IP addresses
+    local peer_info=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo)
+    local peer_ips=($(echo "$peer_info" | jq -r '.[].addr' | cut -d':' -f1))
+
+    # Update frequency map with block heights from connected nodes
+    update_frequency_map "locally_connected_node" frequency_map "${peer_ips[@]}"
+
+    # Determine the Majority Block Height (MBH)
+    mbh=$(determine_mbh frequency_map)
 
     # Get local node block height
     local local_height
@@ -182,21 +207,21 @@ main() {
     local peer_count=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo | jq -r 'length')
 
     # Log local node information
-    echo "$timestamp origin: local_node hostname: $(hostname) block_height: $local_height" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
+    echo "$timestamp ip: localhost block_height: $local_height" >> "$LOG_FILE"
 
     # Check on-chain condition
     local on_chain=false
-    if [ "$node_online" = true ] && (( local_height >= average_bh - 50 && local_height <= average_bh + 50 )); then
+    if [ "$node_online" = true ] && (( local_height >= mbh - 50 && local_height <= mbh + 50 )); then
         on_chain=true
     elif [ "$node_online" = false ]; then
         on_chain="unknown"
     fi
 
     # Log on-chain condition, node online status, and peer count
-    echo "$timestamp Average Block Height: $average_bh" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
-    echo "$timestamp On-Chain: $on_chain" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
-    echo "$timestamp Node Online: $node_online" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
-    echo "$timestamp Peer Count: $peer_count" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
+    echo "$timestamp Majority Block Height: $mbh" >> "$LOG_FILE"
+    echo "$timestamp On-Chain: $on_chain" >> "$LOG_FILE"
+    echo "$timestamp Node Online: $node_online" >> "$LOG_FILE"
+    echo "$timestamp Peer Count: $peer_count" >> "$LOG_FILE"
 
     # Read the current alert count
     local alert_count=0
@@ -204,56 +229,45 @@ main() {
         alert_count=$(cat "$ALERT_COUNT_FILE")
     fi
 
-    # Read the current threshold count
-    local threshold_count=0
-    if [ -f "$THRESHOLD_COUNT_FILE" ]; then
-        threshold_count=$(cat "$THRESHOLD_COUNT_FILE")
-    fi
-
-    # Read the previous node online status
-    previous_node_online=true
-    if [ -f "$CONFIG_DIR/previous_node_online.txt" ]; then
-        previous_node_online=$(cat "$CONFIG_DIR/previous_node_online.txt")
-    fi
+    # Read the current runtime data
+    local threshold_count=$(jq -r '.threshold_count' "$RUNTIME_FILE")
+    local previous_node_online=$(jq -r '.previous_node_online' "$RUNTIME_FILE")
 
     # Increment threshold count if node is offline
     if [ "$node_online" = false ]; then
         threshold_count=$((threshold_count + 1))
-        echo "$threshold_count" > "$THRESHOLD_COUNT_FILE"
+        jq --argjson count "$threshold_count" '.threshold_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
     else
         # Reset threshold count if node is back online
         threshold_count=0
-        echo "$threshold_count" > "$THRESHOLD_COUNT_FILE"
+        jq --argjson count "$threshold_count" '.threshold_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         
         # Send email if node has come back online
         if [ "$previous_node_online" = false ]; then
             local subject="Pocketnet Node Status - Node is back ONLINE"
-            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nAverage Block Height: $average_bh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
             send_email "$subject" "$body"
-            echo "$timestamp Email Sent: $subject" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
+            echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
         fi
     fi
 
     # Save the current node online status for the next run
-    echo "$node_online" > "$CONFIG_DIR/previous_node_online.txt"
+    jq --argjson online "$node_online" '.previous_node_online = $online' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
 
     # Send email if threshold is exceeded
     if [ "$threshold_count" -ge "$THRESHOLD" ]; then
         if [ "$alert_count" -lt "$MAX_ALERTS" ]; then
             local subject="Pocketnet Node Status - Node Online: $node_online / On-Chain: $on_chain"
-            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nAverage Block Height: $average_bh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
             if [ "$alert_count" -eq "$((MAX_ALERTS - 1))" ]; then
                 body="$body\n\nThis is the last alert. Further emails will be suppressed until the node comes back online."
             fi
             send_email "$subject" "$body"
-            echo "$timestamp Email Sent: $subject" | tee -a "$LOG_FILE" >> "$TEMP_LOG_FILE"
+            echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
             alert_count=$((alert_count + 1))
             echo "$alert_count" > "$ALERT_COUNT_FILE"
         fi
     fi
-
-    # Clean up the temporary log file
-    rm "$TEMP_LOG_FILE"
 }
 
 # Run the main function
