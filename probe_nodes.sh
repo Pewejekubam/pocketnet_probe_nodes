@@ -3,7 +3,33 @@
 # MIT License
 # See LICENSE file in the root of the repository for details.
 
+## 202502052105CST
+# This is the version I'm trying to get the external config file working correctly
+#  I also need to get the 'Marjority Block Height' integrated and replace the 
+#  'Average Block Height' with the 'Majority Block Height'
+
+## 202502071306CST
+# Normalized version that includes debug code
+
+## 202502071344CST
+# Removed file-based seed node IP address list
+
+## 202502071349CST
+# compared MBH logic to working test script.
+
+## 202502071355CST
+# This version is working!  MGH logic and logging output are solid.
+# I'll start trying to tighten up the code and the log output.
+
+## 202502071401CST
+# Consolidated runtime data into a single file
+
+## 202502071405CST
+# Enabled email testing feature
+
+
 # Read configuration parameters from JSON file
+cd "$(dirname "$0")"
 CONFIG_FILE="probe_nodes_conf.json"
 
 # Ensure the configuration file exists
