@@ -1,46 +1,26 @@
 #!/bin/bash
 
 # MIT License
-# See LICENSE file in the root of the repository for details.
-
-## 202502052105CST
-# This is the version I'm trying to get the external config file working correctly
-#  I also need to get the 'Marjority Block Height' integrated and replace the 
-#  'Average Block Height' with the 'Majority Block Height'
-
-## 202502071306CST
-# Normalized version that includes debug code
-
-## 202502071344CST
-# Removed file-based seed node IP address list
-
-## 202502071349CST
-# compared MBH logic to working test script.
-
-## 202502071355CST
-# This version is working!  MGH logic and logging output are solid.
-# I'll start trying to tighten up the code and the log output.
-
-## 202502071401CST
-# Consolidated runtime data into a single file
-
-## 202502071405CST
-# Enabled email testing feature
-
 
 # Read configuration parameters from JSON file
 cd "$(dirname "$0")"
 CONFIG_FILE="probe_nodes_conf.json"
 
+# Function to log messages
+log_message() {
+    local message=$1
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+}
+
 # Ensure the configuration file exists
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - Configuration file not found: $CONFIG_FILE"
+    log_message "Configuration file not found: $CONFIG_FILE"
     exit 1
 fi
 
 # Validate the configuration file format
 if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - Invalid JSON format in configuration file: $CONFIG_FILE"
+    log_message "Invalid JSON format in configuration file: $CONFIG_FILE"
     exit 1
 fi
 
@@ -72,7 +52,7 @@ fi
 check_required_param() {
     local param_name=$1
     if ! jq -e ". | has(\"$param_name\")" "$CONFIG_FILE" > /dev/null; then
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - Missing required parameter in configuration file: $param_name" | tee -a "$LOG_FILE"
+        log_message "Missing required parameter in configuration file: $param_name"
         exit 1
     fi
 }
@@ -105,10 +85,10 @@ get_node_info() {
     local version=$(echo $response | jq -r '.result.version' 2>/dev/null)
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     if [ -n "$block_height" ]; then
-        echo "$timestamp ip: $node_ip block_height: $block_height version: $version" >> "$LOG_FILE"
+        log_message "ip: $node_ip block_height: $block_height version: $version"
         echo "$block_height"
     else
-        echo "$timestamp ip: $node_ip - Unreachable or no response within 1 second" >> "$LOG_FILE"
+        log_message "ip: $node_ip - Unreachable or no response within 1 second"
     fi
 }
 
@@ -192,7 +172,7 @@ main() {
     # Check if the seed IPs array is empty
     if [ ${#seed_node_ips[@]} -eq 0 ]; then
         # Log the message
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - No seed nodes retrieved. The seed IPs array is empty." >> "$LOG_FILE"
+        log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
         send_email "Seed Node Retrieval Alert" "No seed nodes retrieved. The seed IPs array is empty."
@@ -233,7 +213,7 @@ main() {
     local peer_count=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo | jq -r 'length')
 
     # Log local node information
-    echo "$timestamp ip: localhost block_height: $local_height" >> "$LOG_FILE"
+    log_message "ip: localhost block_height: $local_height"
 
     # Check on-chain condition
     local on_chain=false
@@ -244,10 +224,10 @@ main() {
     fi
 
     # Log on-chain condition, node online status, and peer count
-    echo "$timestamp Majority Block Height: $mbh" >> "$LOG_FILE"
-    echo "$timestamp On-Chain: $on_chain" >> "$LOG_FILE"
-    echo "$timestamp Node Online: $node_online" >> "$LOG_FILE"
-    echo "$timestamp Peer Count: $peer_count" >> "$LOG_FILE"
+    log_message "Majority Block Height: $mbh"
+    log_message "On-Chain: $on_chain"
+    log_message "Node Online: $node_online"
+    log_message "Peer Count: $peer_count"
 
     # Read the current alert count
     local alert_count=0
@@ -273,7 +253,7 @@ main() {
             local subject="Pocketnet Node Status - Node is back ONLINE"
             local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
             send_email "$subject" "$body"
-            echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
+            log_message "Email Sent: $subject"
         fi
     fi
 
@@ -289,7 +269,7 @@ main() {
                 body="$body\n\nThis is the last alert. Further emails will be suppressed until the node comes back online."
             fi
             send_email "$subject" "$body"
-            echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
+            log_message "Email Sent: $subject"
             alert_count=$((alert_count + 1))
             echo "$alert_count" > "$ALERT_COUNT_FILE"
         fi
