@@ -1,21 +1,28 @@
 #!/bin/bash
+# 202503021710CST
+## Appears that this is a working version.  Increments and thresholds work.  Email works.
 
 # MIT License
-# See LICENSE file in the root of the repository for details.
 
 # Read configuration parameters from JSON file
 cd "$(dirname "$0")"
 CONFIG_FILE="probe_nodes_conf.json"
 
+# Function to log messages
+log_message() {
+    local message=$1
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+}
+
 # Ensure the configuration file exists
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - Configuration file not found: $CONFIG_FILE"
+    log_message "Configuration file not found: $CONFIG_FILE"
     exit 1
 fi
 
 # Validate the configuration file format
 if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - Invalid JSON format in configuration file: $CONFIG_FILE"
+    log_message "Invalid JSON format in configuration file: $CONFIG_FILE"
     exit 1
 fi
 
@@ -47,7 +54,7 @@ fi
 check_required_param() {
     local param_name=$1
     if ! jq -e ". | has(\"$param_name\")" "$CONFIG_FILE" > /dev/null; then
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - Missing required parameter in configuration file: $param_name" | tee -a "$LOG_FILE"
+        log_message "Missing required parameter in configuration file: $param_name"
         exit 1
     fi
 }
@@ -80,10 +87,10 @@ get_node_info() {
     local version=$(echo $response | jq -r '.result.version' 2>/dev/null)
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     if [ -n "$block_height" ]; then
-        echo "$timestamp ip: $node_ip block_height: $block_height version: $version" >> "$LOG_FILE"
+        log_message "ip: $node_ip block_height: $block_height version: $version"
         echo "$block_height"
     else
-        echo "$timestamp ip: $node_ip - Unreachable or no response within 1 second" >> "$LOG_FILE"
+        log_message "ip: $node_ip - Unreachable or no response within 1 second"
     fi
 }
 
@@ -120,8 +127,11 @@ determine_mbh() {
     echo "$mbh"
 }
 
-# Function to construct msmtp command
-construct_msmtp_command() {
+# Function to send email
+send_email() {
+    local subject=$1
+    local body=$2
+    local hostname=$(hostname)
     local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
     
     if [ -n "$MSMTP_USER" ]; then
@@ -140,14 +150,6 @@ construct_msmtp_command() {
         msmtp_command="$msmtp_command --auth=on"
     fi
     
-    echo "$msmtp_command"
-}
-
-# Function to send email
-send_email() {
-    local subject=$1
-    local body=$2
-    local msmtp_command=$(construct_msmtp_command)
     echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
@@ -172,7 +174,7 @@ main() {
     # Check if the seed IPs array is empty
     if [ ${#seed_node_ips[@]} -eq 0 ]; then
         # Log the message
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - No seed nodes retrieved. The seed IPs array is empty." >> "$LOG_FILE"
+        log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
         send_email "Seed Node Retrieval Alert" "No seed nodes retrieved. The seed IPs array is empty."
@@ -213,7 +215,7 @@ main() {
     local peer_count=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo | jq -r 'length')
 
     # Log local node information
-    echo "$timestamp ip: localhost block_height: $local_height" >> "$LOG_FILE"
+    log_message "ip: localhost block_height: $local_height"
 
     # Check on-chain condition
     local on_chain=false
@@ -224,10 +226,10 @@ main() {
     fi
 
     # Log on-chain condition, node online status, and peer count
-    echo "$timestamp Majority Block Height: $mbh" >> "$LOG_FILE"
-    echo "$timestamp On-Chain: $on_chain" >> "$LOG_FILE"
-    echo "$timestamp Node Online: $node_online" >> "$LOG_FILE"
-    echo "$timestamp Peer Count: $peer_count" >> "$LOG_FILE"
+    log_message "Majority Block Height: $mbh"
+    log_message "On-Chain: $on_chain"
+    log_message "Node Online: $node_online"
+    log_message "Peer Count: $peer_count"
 
     # Read the current alert count
     local alert_count=0
@@ -243,41 +245,37 @@ main() {
     if [ "$node_online" = false ]; then
         threshold_count=$((threshold_count + 1))
         jq --argjson count "$threshold_count" '.threshold_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
-        
-        # Send email if threshold is exceeded
-        if [ "$threshold_count" -ge "$THRESHOLD" ]; then
-            if [ "$alert_count" -lt "$MAX_ALERTS" ]; then
-                local subject="Pocketnet Node Status - Node Offline"
-                local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
-                if [ "$alert_count" -eq "$((MAX_ALERTS - 1))" ]; then
-                    body="$body\n\nThis is the last alert. Further emails will be suppressed until the node comes back online."
-                fi
-                send_email "$subject" "$body"
-                echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
-                alert_count=$((alert_count + 1))
-                echo "$alert_count" > "$ALERT_COUNT_FILE"
-            fi
-        fi
     else
         # Reset threshold count if node is back online
         threshold_count=0
         jq --argjson count "$threshold_count" '.threshold_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
-        
-        # Reset alert count if node is back online
-        alert_count=0
-        echo "$alert_count" > "$ALERT_COUNT_FILE"
         
         # Send email if node has come back online
         if [ "$previous_node_online" = false ]; then
             local subject="Pocketnet Node Status - Node is back ONLINE"
             local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
             send_email "$subject" "$body"
-            echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
+            log_message "Email Sent: $subject"
         fi
     fi
 
     # Save the current node online status for the next run
     jq --argjson online "$node_online" '.previous_node_online = $online' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+
+    # Send email if threshold is exceeded
+    if [ "$threshold_count" -ge "$THRESHOLD" ]; then
+        if [ "$alert_count" -lt "$MAX_ALERTS" ]; then
+            local subject="Pocketnet Node Status - Node Online: $node_online / On-Chain: $on_chain"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
+            if [ "$alert_count" -eq "$((MAX_ALERTS - 1))" ]; then
+                body="$body\n\nThis is the last alert. Further emails will be suppressed until the node comes back online."
+            fi
+            send_email "$subject" "$body"
+            log_message "Email Sent: $subject"
+            alert_count=$((alert_count + 1))
+            echo "$alert_count" > "$ALERT_COUNT_FILE"
+        fi
+    fi
 }
 
 # Run the main function
