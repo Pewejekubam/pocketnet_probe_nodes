@@ -25,7 +25,6 @@ LOG_FILE="$CONFIG_DIR/probe_nodes.log"
 RUNTIME_FILE="$CONFIG_DIR/probe_nodes_runtime.json"
 SEED_NODES_URL=$(jq -r '.SEED_NODES_URL' "$CONFIG_FILE")
 MAX_ALERTS=$(jq -r '.MAX_ALERTS' "$CONFIG_FILE")
-ALERT_COUNT_FILE="$CONFIG_DIR/alert_count.txt"
 THRESHOLD=$(jq -r '.THRESHOLD' "$CONFIG_FILE")
 POCKETCOIN_CLI_ARGS=$(jq -r '.POCKETCOIN_CLI_ARGS' "$CONFIG_FILE")
 SMTP_HOST=$(jq -r '.SMTP_HOST' "$CONFIG_FILE")
@@ -40,7 +39,7 @@ EMAIL_TESTING=$(jq -r '.EMAIL_TESTING' "$CONFIG_FILE")
 
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
-    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "threshold_count": 0, "previous_node_online": true}' > "$RUNTIME_FILE"
+    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "threshold_count": 0, "previous_node_online": true, "alert_count": 0}' > "$RUNTIME_FILE"
 fi
 
 # Function to check if a required parameter is missing
@@ -229,15 +228,10 @@ main() {
     echo "$timestamp Node Online: $node_online" >> "$LOG_FILE"
     echo "$timestamp Peer Count: $peer_count" >> "$LOG_FILE"
 
-    # Read the current alert count
-    local alert_count=0
-    if [ -f "$ALERT_COUNT_FILE" ]; then
-        alert_count=$(cat "$ALERT_COUNT_FILE")
-    fi
-
     # Read the current runtime data
     local threshold_count=$(jq -r '.threshold_count' "$RUNTIME_FILE")
     local previous_node_online=$(jq -r '.previous_node_online' "$RUNTIME_FILE")
+    local alert_count=$(jq -r '.alert_count' "$RUNTIME_FILE")
 
     # Increment threshold count if node is offline
     if [ "$node_online" = false ]; then
@@ -255,7 +249,7 @@ main() {
                 send_email "$subject" "$body"
                 echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
                 alert_count=$((alert_count + 1))
-                echo "$alert_count" > "$ALERT_COUNT_FILE"
+                jq --argjson count "$alert_count" '.alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
             fi
         fi
     else
@@ -265,7 +259,7 @@ main() {
         
         # Reset alert count if node is back online
         alert_count=0
-        echo "$alert_count" > "$ALERT_COUNT_FILE"
+        jq --argjson count "$alert_count" '.alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         
         # Send email if node has come back online
         if [ "$previous_node_online" = false ]; then
