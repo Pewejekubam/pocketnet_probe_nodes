@@ -42,11 +42,17 @@ if [ ! -f "$RUNTIME_FILE" ]; then
     echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "threshold_count": 0, "previous_node_online": true, "alert_count": 0}' > "$RUNTIME_FILE"
 fi
 
+# Function to log messages
+log_message() {
+    local message=$1
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+}
+
 # Function to check if a required parameter is missing
 check_required_param() {
     local param_name=$1
     if ! jq -e ". | has(\"$param_name\")" "$CONFIG_FILE" > /dev/null; then
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - Missing required parameter in configuration file: $param_name" | tee -a "$LOG_FILE"
+        log_message "Missing required parameter in configuration file: $param_name"
         exit 1
     fi
 }
@@ -79,10 +85,10 @@ get_node_info() {
     local version=$(echo $response | jq -r '.result.version' 2>/dev/null)
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     if [ -n "$block_height" ]; then
-        echo "$timestamp ip: $node_ip block_height: $block_height version: $version" >> "$LOG_FILE"
+        log_message "ip: $node_ip block_height: $block_height version: $version"
         echo "$block_height"
     else
-        echo "$timestamp ip: $node_ip - Unreachable or no response within 1 second" >> "$LOG_FILE"
+        log_message "ip: $node_ip - Unreachable or no response within 1 second"
     fi
 }
 
@@ -158,9 +164,7 @@ main() {
     if [ "$EMAIL_TESTING" = true ]; then
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
-        echo -e "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\n"
-        echo -e "Subject: $subject\n"
-        echo -e "Body:\n$body\n"
+        log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
         send_email "$subject" "$body"
         exit 0
     fi
@@ -171,7 +175,7 @@ main() {
     # Check if the seed IPs array is empty
     if [ ${#seed_node_ips[@]} -eq 0 ]; then
         # Log the message
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - No seed nodes retrieved. The seed IPs array is empty." >> "$LOG_FILE"
+        log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
         send_email "Seed Node Retrieval Alert" "No seed nodes retrieved. The seed IPs array is empty."
@@ -212,7 +216,7 @@ main() {
     local peer_count=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo | jq -r 'length')
 
     # Log local node information
-    echo "$timestamp ip: localhost block_height: $local_height" >> "$LOG_FILE"
+    log_message "ip: localhost block_height: $local_height"
 
     # Check on-chain condition
     local on_chain=false
@@ -223,10 +227,10 @@ main() {
     fi
 
     # Log on-chain condition, node online status, and peer count
-    echo "$timestamp Majority Block Height: $mbh" >> "$LOG_FILE"
-    echo "$timestamp On-Chain: $on_chain" >> "$LOG_FILE"
-    echo "$timestamp Node Online: $node_online" >> "$LOG_FILE"
-    echo "$timestamp Peer Count: $peer_count" >> "$LOG_FILE"
+    log_message "Majority Block Height: $mbh"
+    log_message "On-Chain: $on_chain"
+    log_message "Node Online: $node_online"
+    log_message "Peer Count: $peer_count"
 
     # Read the current runtime data
     local threshold_count=$(jq -r '.threshold_count' "$RUNTIME_FILE")
@@ -247,7 +251,7 @@ main() {
                     body="$body\n\nThis is the last alert. Further emails will be suppressed until the node comes back online."
                 fi
                 send_email "$subject" "$body"
-                echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
+                log_message "Email Sent: $subject"
                 alert_count=$((alert_count + 1))
                 jq --argjson count "$alert_count" '.alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
             fi
@@ -266,7 +270,7 @@ main() {
             local subject="Pocketnet Node Status - Node is back ONLINE"
             local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
             send_email "$subject" "$body"
-            echo "$timestamp Email Sent: $subject" >> "$LOG_FILE"
+            log_message "Email Sent: $subject"
         fi
     fi
 
