@@ -11,7 +11,7 @@ CONFIG_FILE="probe_nodes_conf.json"
 # Function to log messages
 log_message() {
     local message=$1
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" >> "$LOG_FILE"
 }
 
 # Ensure the configuration file exists
@@ -46,7 +46,7 @@ EMAIL_TESTING=$(jq -r '.EMAIL_TESTING' "$CONFIG_FILE")
 
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
-    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "threshold_count": 0, "previous_node_online": true, "alert_count": 0}' > "$RUNTIME_FILE"
+    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0}' > "$RUNTIME_FILE"
 fi
 
 # Function to check if a required parameter is missing
@@ -168,9 +168,7 @@ main() {
     if [ "$EMAIL_TESTING" = true ]; then
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
-        echo -e "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\n"
-        echo -e "Subject: $subject\n"
-        echo -e "Body:\n$body\n"
+        log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
         send_email "$subject" "$body"
         exit 0
     fi
@@ -239,23 +237,27 @@ main() {
     log_message "Peer Count: $peer_count"
 
     # Read the current runtime data
-    local threshold_count=$(jq -r '.threshold_count' "$RUNTIME_FILE")
+    local offline_check_count=$(jq -r '.offline_check_count' "$RUNTIME_FILE")
     local previous_node_online=$(jq -r '.previous_node_online' "$RUNTIME_FILE")
-    local alert_count=$(jq -r '.alert_count' "$RUNTIME_FILE")
+    local sent_alert_count=$(jq -r '.sent_alert_count' "$RUNTIME_FILE")
 
-    # Increment threshold count if node is offline
+    # Increment offline check count if node is offline
     if [ "$node_online" = false ]; then
-        threshold_count=$((threshold_count + 1))
-        jq --argjson count "$threshold_count" '.threshold_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+        offline_check_count=$((offline_check_count + 1))
+        log_message "Node Offline - Consecutive Offline Checks: $offline_check_count"
+        jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
     else
-        # Reset threshold count if node is back online
-        threshold_count=0
-        jq --argjson count "$threshold_count" '.threshold_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+        # Reset offline check count if node is back online
+        offline_check_count=0
+        if [ "$sent_alert_count" -gt 0 ]; then
+            log_message "Node Online - Resetting Offline Checks Count"
+        fi
+        jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         
         # Send email if node has come back online
         if [ "$previous_node_online" = false ]; then
             local subject="Pocketnet Node Status - Node is back ONLINE"
-            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
             send_email "$subject" "$body"
             log_message "Email Sent: $subject"
         fi
@@ -265,17 +267,17 @@ main() {
     jq --argjson online "$node_online" '.previous_node_online = $online' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
 
     # Send email if threshold is exceeded
-    if [ "$threshold_count" -ge "$THRESHOLD" ]; then
-        if [ "$alert_count" -lt "$MAX_ALERTS" ]; then
+    if [ "$offline_check_count" -ge "$THRESHOLD" ]; then
+        if [ "$sent_alert_count" -lt "$MAX_ALERTS" ]; then
             local subject="Pocketnet Node Status - Node Online: $node_online / On-Chain: $on_chain"
-            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nThreshold Count: $threshold_count"
-            if [ "$alert_count" -eq "$((MAX_ALERTS - 1))" ]; then
-                body="$body\n\nThis is the last alert. Further emails will be suppressed until the node comes back online."
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
+            if [ "$sent_alert_count" -eq "$((MAX_ALERTS - 1))" ]; then
+                body="$body\n\nAlert Limit Reached - No More Alerts Will Be Sent"
             fi
             send_email "$subject" "$body"
-            log_message "Email Sent: $subject"
-            alert_count=$((alert_count + 1))
-            jq --argjson count "$alert_count" '.alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+            log_message "Alert Sent - Current Alert Count: $sent_alert_count"
+            sent_alert_count=$((sent_alert_count + 1))
+            jq --argjson count "$sent_alert_count" '.sent_alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         fi
     fi
 }
