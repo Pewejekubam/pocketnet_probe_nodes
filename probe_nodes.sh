@@ -52,6 +52,12 @@ if [ ! -f "$RUNTIME_FILE" ]; then
     echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": "", "offline_start_time": "", "consecutive_lag_checks": 0}' > "$RUNTIME_FILE"
 fi
 
+# Function to log messages
+log_message() {
+    local message=$1
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+}
+
 # Function to check if a required parameter is missing
 check_required_param() {
     local param_name=$1
@@ -178,6 +184,7 @@ main() {
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
         log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
+        log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
         send_email "$subject" "$body"
         exit 0
     fi
@@ -188,6 +195,7 @@ main() {
     # Check if the seed IPs array is empty
     if [ ${#seed_node_ips[@]} -eq 0 ]; then
         # Log the message
+        log_message "No seed nodes retrieved. The seed IPs array is empty."
         log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
@@ -233,6 +241,7 @@ main() {
     local peer_count=$(echo "$peer_info" | jq -r 'length')
 
     # Log local node information
+    log_message "ip: localhost block_height: $local_height"
     log_message "ip: localhost block_height: $local_height"
 
     # Check on-chain condition
