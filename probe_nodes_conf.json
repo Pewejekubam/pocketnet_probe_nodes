@@ -12,5 +12,6 @@
     "MSMTP_PASSWORD": "your_password",
     "MSMTP_TLS": true,
     "MSMTP_AUTH": false,
-    "EMAIL_TESTING": false
+    "EMAIL_TESTING": false,
+    "MAJORITY_LAG_THRESH": 300
 }

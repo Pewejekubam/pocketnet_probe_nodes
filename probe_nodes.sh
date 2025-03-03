@@ -45,6 +45,7 @@ MSMTP_PASSWORD=$(jq -r '.MSMTP_PASSWORD' "$CONFIG_FILE")
 MSMTP_TLS=$(jq -r '.MSMTP_TLS' "$CONFIG_FILE")
 MSMTP_AUTH=$(jq -r '.MSMTP_AUTH' "$CONFIG_FILE")
 EMAIL_TESTING=$(jq -r '.EMAIL_TESTING' "$CONFIG_FILE")
+MAJORITY_LAG_THRESH=$(jq -r '.MAJORITY_LAG_THRESH' "$CONFIG_FILE")
 
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
@@ -70,6 +71,7 @@ check_required_param "SMTP_HOST"
 check_required_param "SMTP_PORT"
 check_required_param "RECIPIENT_EMAIL"
 check_required_param "MSMTP_FROM"
+check_required_param "MAJORITY_LAG_THRESH"
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
@@ -237,6 +239,17 @@ main() {
     log_message "On-Chain: $on_chain"
     log_message "Node Online: $node_online"
     log_message "Peer Count: $peer_count"
+
+    # Check if node's block height exceeds the majority lag threshold
+    if [ "$node_online" = true ] && [ "$local_height" != "unknown" ]; then
+        local block_lag=$((mbh - local_height))
+        if (( block_lag > MAJORITY_LAG_THRESH )); then
+            local subject="Node Alert: Block Lag Detected"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nNode Lag Behind Majority Block Height: $block_lag blocks"
+            send_email "$subject" "$body"
+            log_message "Node Lag Behind Majority Block Height: $block_lag blocks"
+        fi
+    fi
 
     # Read the current runtime data
     local offline_check_count=$(jq -r '.offline_check_count' "$RUNTIME_FILE")
