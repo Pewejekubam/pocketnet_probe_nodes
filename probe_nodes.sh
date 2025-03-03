@@ -1,6 +1,8 @@
 #!/bin/bash
-# 202503021710CST
-## Appears that this is a working version.  Increments and thresholds work.  Email works.
+# 202503031142CST
+## Mostly working version.
+## todo: Tighten up email logging, offline duration calculation
+
 
 # MIT License
 
