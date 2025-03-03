@@ -249,9 +249,7 @@ main() {
     else
         # Reset offline check count if node is back online
         offline_check_count=0
-        if [ "$sent_alert_count" -gt 0 ]; then
-            log_message "Node Online - Resetting Offline Checks Count"
-        fi
+        log_message "Node Online - Resetting Offline Checks Count"
         jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         
         # Send email if node has come back online
