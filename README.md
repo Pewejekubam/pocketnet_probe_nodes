@@ -1,88 +1,252 @@
-# Pocketnet Node Monitoring Script
+# Pocketnet Node Monitor
 
-## by Pewejekubam -- a Pocketnet node operator
+A robust monitoring script for Pocketnet blockchain nodes that tracks node status, block height, and detects when your node is lagging behind the network's majority block height.
 
-## Overview
+## Features
 
-This script monitors Pocketnet nodes and sends alerts via email when certain conditions are met. It retrieves seed node IP addresses, checks block heights, and determines the majority block height (MBH). The script can also send test emails to verify email configuration. Additionally, it logs the duration the node was offline in a human-readable format and includes this information in the email alert when the node transitions back online.
+- **Network Consensus Monitoring**: Calculates the Majority Block Height (MBH) across the network
+- **LAG Detection**: Alerts when your node falls behind the network consensus
+- **Node Status Tracking**: Monitors when your node goes offline or comes back online
+- **Email Notifications**: Sends alerts when issues are detected
+- **Runtime Statistics**: Maintains statistics between script executions
+- **Configurable Thresholds**: Customize alert sensitivity based on your needs
 
-## Prerequisites
+## Requirements
 
-- jq (for processing JSON)
-- curl (for making HTTP requests)
-- msmtp (for sending emails)
+- A running Pocketnet node
+- Bash shell
+- `jq` (JSON processor)
+- `curl` (HTTP client)
+- `msmtp` (SMTP client for email notifications)
+
+## Installation
+
+1. Clone this repository or download the script:
+
+```bash
+git clone https://github.com/yourusername/pocketnet-node-monitor.git
+cd pocketnet-node-monitor
+```
+
+2. Make the script executable:
+
+```bash
+chmod +x probe_nodes-08.sh
+```
+
+3. Create the configuration file (`probe_nodes_conf.json`):
+
+```bash
+cp probe_nodes_conf.example.json probe_nodes_conf.json
+```
+
+4. Edit the configuration file with your settings:
+
+```bash
+nano probe_nodes_conf.json
+```
 
 ## Configuration
 
-probe_nodes_conf.json 
+Edit `probe_nodes_conf.json` with your specific settings:
 
 ```json
 {
-    "CONFIG_DIR": "/home/pocketnet/probe_nodes",
-    "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
-    "MAX_ALERTS": 3,
-    "THRESHOLD": 3,
-    "POCKETCOIN_CLI_ARGS": "",
-    "SMTP_HOST": "smtp.example.com",
-    "SMTP_PORT": 587,
-    "RECIPIENT_EMAIL": "alert@example.com",
-    "MSMTP_FROM": "node@example.com",
-    "MSMTP_USER": "your_email@example.com",
-    "MSMTP_PASSWORD": "your_password",
-    "MSMTP_TLS": true,
-    "MSMTP_AUTH": false,
-    "EMAIL_TESTING": false
+  "CONFIG_DIR": "/path/to/config/directory",
+  "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
+  "MAX_ALERTS": 5,
+  "THRESHOLD": 3,
+  "POCKETCOIN_CLI_ARGS": "-datadir=/path/to/pocketcoin/data",
+  "SMTP_HOST": "smtp.example.com",
+  "SMTP_PORT": 587,
+  "RECIPIENT_EMAIL": "your-email@example.com",
+  "MSMTP_FROM": "node-monitor@example.com",
+  "MSMTP_USER": "smtp-username",
+  "MSMTP_PASSWORD": "smtp-password",
+  "MSMTP_TLS": "true",
+  "MSMTP_AUTH": "true",
+  "EMAIL_TESTING": "false",
+  "MAJORITY_LAG_THRESH": 300
 }
 ```
 
-### Parameter Descriptions
+### Configuration Parameters
 
- 1. CONFIG_DIR: The directory where the script will store log files, runtime files, and other necessary data.
- 2. SEED_NODES_URL: The URL to retrieve the list of seed node IP addresses.
- 3. MAX_ALERTS: The maximum number of alert emails that the script will send if a node is offline or off-chain. This helps prevent flooding the recipient with too many emails in case of persistent issues.
- 4. THRESHOLD: The number of consecutive times the script detects that the node is offline or off-chain before it sends an alert email. This helps to avoid false positives due to transient network issues.
- 5. POCKETCOIN_CLI_ARGS: The command-line arguments to pass to the pocketcoin-cli command. This can be useful for specifying additional parameters or options when interacting with the Pocketnet node.
- 6. SMTP_HOST: The hostname or IP address of the SMTP server used to send alert emails. This should be configured to match your email provider's SMTP server.
- 7. SMTP_PORT: The port number to connect to the SMTP server. Common port numbers are 25, 465 (SSL), and 587 (TLS).
- 8. RECIPIENT_EMAIL: The email address where the alert notifications will be sent. This should be a valid email address that you or the intended recipient can monitor.
- 9. MSMTP_FROM: The email address that appears as the sender of the alert emails. This should be a valid email address that is recognized by the SMTP server.
-10. MSMTP_USER: The username for authenticating with the SMTP server. This is typically the same as the email address used to send the emails.
-11. MSMTP_PASSWORD: The password for authenticating with the SMTP server. Ensure this is handled securely to prevent unauthorized access.
-12. MSMTP_TLS: A boolean value indicating whether to use TLS (Transport Layer Security) for secure communication with the SMTP server. Set to true to enable TLS.
-13. MSMTP_AUTH: A boolean value indicating whether to use authentication when connecting to the SMTP server. Set to true to enable authentication.
-14. EMAIL_TESTING: A boolean value indicating whether to send a test email to verify the email configuration. Set to true to send a test email; the script will exit after sending the test email.
+| Parameter | Description |
+|-----------|-------------|
+| `CONFIG_DIR` | Directory to store runtime data and logs |
+| `SEED_NODES_URL` | URL to retrieve seed node IP addresses |
+| `MAX_ALERTS` | Maximum number of consecutive alerts to send |
+| `THRESHOLD` | Number of consecutive offline checks before alerting |
+| `POCKETCOIN_CLI_ARGS` | Arguments to pass to pocketcoin-cli |
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP server port |
+| `RECIPIENT_EMAIL` | Email address to receive alerts |
+| `MSMTP_FROM` | Sender email address |
+| `MSMTP_USER` | SMTP username (optional) |
+| `MSMTP_PASSWORD` | SMTP password (optional) |
+| `MSMTP_TLS` | Use TLS for SMTP connection ("true" or "false") |
+| `MSMTP_AUTH` | Use authentication for SMTP connection ("true" or "false") |
+| `EMAIL_TESTING` | Enable email testing mode ("true" or "false") |
+| `MAJORITY_LAG_THRESH` | Maximum allowed block difference from majority height |
 
 ## Usage
 
-1. Ensure the probe_nodes_conf.json configuration file is in the same directory as the script.
-2. Make the script executable:
+### Manual Execution
 
-   ```bash
-   chmod +x your_script.sh
-   ```
-3. Run the script:
+Run the script manually:
 
-   ```bash
-   ./probe_nodes.sh
-   ```
+```bash
+./probe_nodes.sh
+```
 
-## Functions
+### Setting up a Cron Job
 
-- get_seed_ips(): Retrieves seed IP addresses.
-- get_node_info(node_ip): Gets block height and version from a node.
-- update_frequency_map(origin, freq_map, node_ips): Updates frequency map with block heights.
-- determine_mbh(freq_map): Determines the Majority Block Height (MBH).
-- send_email(subject, body): Sends an email notification.
-- main(): Main function to run the script.
+To run the script automatically at regular intervals:
 
-## Logging
+1. Edit your crontab:
 
-Logs are stored in the probe_nodes.log file within the CONFIG_DIR directory. Logs include timestamps, IP addresses, block heights, and any errors encountered during execution. The script also logs the duration the node was offline in a human-readable format when it transitions back online.
+```bash
+crontab -e
+```
 
-## Error Handling
+2. Add an entry to run the script every 15 minutes:
 
-The script ensures that required parameters are present in the configuration file and checks the validity of the JSON format. If any issues are encountered, appropriate error messages are logged, and the script exits.
+```
+*/15 * * * * /path/to/probe_nodes-08.sh > /dev/null 2>&1
+```
+
+### Testing Email Configuration
+
+Set `EMAIL_TESTING` to `true` in your configuration file and run the script. It will send a test email and exit:
+
+```bash
+./probe_nodes.sh
+```
+
+After confirming email functionality works, set `EMAIL_TESTING` back to `false`.
+
+## How It Works
+
+### Majority Block Height (MBH) Calculation
+
+The script determines the network consensus by:
+
+1. Retrieving a list of seed nodes
+2. Collecting block heights from seed nodes
+3. Collecting block heights from connected peers
+4. Finding the most frequent block height (the majority)
+
+### LAG Detection Logic
+
+The script considers your node to be lagging when:
+
+1. Your node is online
+2. Your node's block height is lower than the Majority Block Height (MBH)
+3. The difference exceeds the configured `MAJORITY_LAG_THRESH` value
+4. This condition persists for multiple checks (tracked by `consecutive_lag_checks`)
+
+### On-Chain Status
+
+Your node is considered "on-chain" when:
+
+1. The node is online
+2. The node's block height is within `MAJORITY_LAG_THRESH` blocks of the MBH
+
+### Offline Detection
+
+The script tracks offline status by:
+
+1. Attempting to query node information via CLI and API
+2. Incrementing an offline counter for each failed check
+3. Sending an alert when the counter exceeds the configured threshold
+4. Tracking the duration of offline periods
+
+## Log Files
+
+The script creates these files in your configured `CONFIG_DIR`:
+
+- `probe_nodes.log` - Main log file with script activity
+- `probe_nodes_runtime.json` - Runtime data persisted between executions
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Script fails to run**:
+   - Ensure the script is executable (`chmod +x probe_nodes-08.sh`)
+   - Check that all dependencies are installed (`jq`, `curl`, `msmtp`)
+
+2. **No emails are sent**:
+   - Verify SMTP configuration
+   - Check that `msmtp` is installed and working
+   - Try the test mode by setting `EMAIL_TESTING` to `true`
+
+3. **Script reports "No seed nodes retrieved"**:
+   - Check your internet connection
+   - Verify the `SEED_NODES_URL` is correct and accessible
+
+4. **False positive LAG alerts**:
+   - Increase `MAJORITY_LAG_THRESH` to be more tolerant of small variations
+   - Check network connectivity to ensure all nodes are reachable
+
+5. **Invalid block height values**:
+   - Ensure your Pocketnet node is fully synced
+   - Check if your node's API is working properly
+
+## Dependencies Installation
+
+### Ubuntu/Debian
+
+```bash
+sudo apt-get update
+sudo apt-get install jq curl msmtp
+```
+
+### CentOS/RHEL
+
+```bash
+sudo yum install epel-release
+sudo yum install jq curl
+sudo yum install msmtp
+```
+
+### macOS (using Homebrew)
+
+```bash
+brew install jq curl msmtp
+```
+
+
+## Advanced Configuration
+
+### Tuning LAG Thresholds
+
+The `MAJORITY_LAG_THRESH` parameter controls how sensitive the script is to your node falling behind:
+
+- **Lower values** (e.g., 3-5 blocks): More sensitive, potentially more false positives
+- **Higher values** (e.g., 200-300 blocks): Less sensitive, might miss smaller lags
+
+Choose a value appropriate for your network's block time and acceptable sync delay.
+
+### Alert Frequency
+
+To avoid alert fatigue:
+
+1. Set `MAX_ALERTS` to limit consecutive alerts
+2. Adjust the cron schedule to run less frequently
+3. Increase `THRESHOLD` to require more consecutive failures
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+MIT License - See the LICENSE file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
