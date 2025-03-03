@@ -1,14 +1,28 @@
 #!/bin/bash
-# 202503031142CST
-## Mostly working version.
-## todo: Tighten up email logging, offline duration calculation
-
+## 202503031405CST
+# First iteration of LAG logic
 
 # MIT License
 
 # Read configuration parameters from JSON file
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || { echo "Failed to change directory"; exit 1; }
 CONFIG_FILE="probe_nodes_conf.json"
+
+# Ensure the configuration file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Configuration file not found: $CONFIG_FILE"
+    exit 1
+fi
+
+# Validate the configuration file format
+if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+    echo "Invalid JSON format in configuration file: $CONFIG_FILE"
+    exit 1
+fi
+
+# Read configuration parameters from JSON file
+CONFIG_DIR=$(jq -r '.CONFIG_DIR' "$CONFIG_FILE")
+LOG_FILE="$CONFIG_DIR/probe_nodes.log"
 
 # Function to log messages
 log_message() {
@@ -16,21 +30,7 @@ log_message() {
     echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" >> "$LOG_FILE"
 }
 
-# Ensure the configuration file exists
-if [ ! -f "$CONFIG_FILE" ]; then
-    log_message "Configuration file not found: $CONFIG_FILE"
-    exit 1
-fi
-
-# Validate the configuration file format
-if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-    log_message "Invalid JSON format in configuration file: $CONFIG_FILE"
-    exit 1
-fi
-
-# Read configuration parameters from JSON file
-CONFIG_DIR=$(jq -r '.CONFIG_DIR' "$CONFIG_FILE")
-LOG_FILE="$CONFIG_DIR/probe_nodes.log"
+# Continue with the rest of the configuration
 RUNTIME_FILE="$CONFIG_DIR/probe_nodes_runtime.json"
 SEED_NODES_URL=$(jq -r '.SEED_NODES_URL' "$CONFIG_FILE")
 MAX_ALERTS=$(jq -r '.MAX_ALERTS' "$CONFIG_FILE")
@@ -49,7 +49,7 @@ MAJORITY_LAG_THRESH=$(jq -r '.MAJORITY_LAG_THRESH' "$CONFIG_FILE")
 
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
-    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": "", "offline_start_time": ""}' > "$RUNTIME_FILE"
+    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": "", "offline_start_time": "", "consecutive_lag_checks": 0}' > "$RUNTIME_FILE"
 fi
 
 # Function to check if a required parameter is missing
@@ -153,15 +153,20 @@ send_email() {
         msmtp_command="$msmtp_command --passwordeval='echo $MSMTP_PASSWORD'"
     fi
     
-    if [ "$MSMTP_TLS" = true ]; then
+    if [ "$MSMTP_TLS" = "true" ]; then
         msmtp_command="$msmtp_command --tls"
     fi
     
-    if [ "$MSMTP_AUTH" = true ]; then
+    if [ "$MSMTP_AUTH" = "true" ]; then
         msmtp_command="$msmtp_command --auth=on"
     fi
     
     echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
+}
+
+# Function to reset LAG-related counters
+reset_lag_counters() {
+    jq '.consecutive_lag_checks = 0' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
 }
 
 # Main function to run the script
@@ -169,7 +174,7 @@ main() {
     local hostname=$(hostname)
 
     # Check if email testing is enabled
-    if [ "$EMAIL_TESTING" = true ]; then
+    if [ "$EMAIL_TESTING" = "true" ]; then
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
         log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
@@ -199,7 +204,11 @@ main() {
     update_frequency_map "seed_node" frequency_map "${seed_node_ips[@]}"
 
     # Get connected nodes' IP addresses
-    local peer_info=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo)
+    local peer_info
+    if ! peer_info=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo 2>/dev/null); then
+        log_message "Failed to get peer info"
+        peer_info="[]"
+    fi
     local peer_ips=($(echo "$peer_info" | jq -r '.[].addr' | cut -d':' -f1))
 
     # Update frequency map with block heights from connected nodes
@@ -210,9 +219,9 @@ main() {
 
     # Get local node block height
     local local_height
-    local node_online=true
+    local node_online="true"
     if ! local_height=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getblockcount 2>/dev/null); then
-        node_online=false
+        node_online="false"
         local_height="unknown"
     else
         local response=$(curl -s --max-time 1 -X POST -H "Content-Type: application/json" -d '{"method": "getnodeinfo", "params": [], "id": ""}' http://localhost:38081 2>/dev/null)
@@ -221,16 +230,18 @@ main() {
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
 
     # Get peer count
-    local peer_count=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getpeerinfo | jq -r 'length')
+    local peer_count=$(echo "$peer_info" | jq -r 'length')
 
     # Log local node information
     log_message "ip: localhost block_height: $local_height"
 
     # Check on-chain condition
-    local on_chain=false
-    if [ "$node_online" = true ] && (( local_height >= mbh - 50 && local_height <= mbh + 50 )); then
-        on_chain=true
-    elif [ "$node_online" = false ]; then
+    local on_chain="false"
+    if [ "$node_online" = "true" ] && [[ "$local_height" =~ ^[0-9]+$ ]] && [[ "$mbh" =~ ^[0-9]+$ ]]; then
+        if (( local_height >= mbh - MAJORITY_LAG_THRESH && local_height <= mbh + MAJORITY_LAG_THRESH )); then
+            on_chain="true"
+        fi
+    elif [ "$node_online" = "false" ]; then
         on_chain="unknown"
     fi
 
@@ -241,13 +252,17 @@ main() {
     log_message "Peer Count: $peer_count"
 
     # Check if node's block height exceeds the majority lag threshold
-    if [ "$node_online" = true ] && [ "$local_height" != "unknown" ]; then
-        local block_lag=$((mbh - local_height))
-        if (( block_lag > MAJORITY_LAG_THRESH )); then
-            local subject="Node Alert: Block Lag Detected"
-            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nNode Lag Behind Majority Block Height: $block_lag blocks"
-            send_email "$subject" "$body"
-            log_message "Node Lag Behind Majority Block Height: $block_lag blocks"
+    if [ "$node_online" = "true" ] && [ "$local_height" != "unknown" ]; then
+        if [[ "$local_height" =~ ^[0-9]+$ ]] && [[ "$mbh" =~ ^[0-9]+$ ]]; then
+            local block_lag=$((mbh - local_height))
+            if (( block_lag > MAJORITY_LAG_THRESH )); then
+                local subject="Node Alert: Block Lag Detected"
+                local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nNode Lag Behind Majority Block Height: $block_lag blocks"
+                send_email "$subject" "$body"
+                log_message "Node Lag Behind Majority Block Height: $block_lag blocks"
+            fi
+        else
+            log_message "Invalid block height values for comparison: mbh=$mbh, local_height=$local_height"
         fi
     fi
 
@@ -257,17 +272,21 @@ main() {
     local sent_alert_count=$(jq -r '.sent_alert_count' "$RUNTIME_FILE")
     local online_start_time=$(jq -r '.online_start_time' "$RUNTIME_FILE")
     local offline_start_time=$(jq -r '.offline_start_time' "$RUNTIME_FILE")
+    local consecutive_lag_checks=$(jq -r '.consecutive_lag_checks' "$RUNTIME_FILE")
 
     # Increment offline check count if node is offline
-    if [ "$node_online" = false ]; then
+    if [ "$node_online" = "false" ]; then
         offline_check_count=$((offline_check_count + 1))
         log_message "Node Offline - Consecutive Offline Checks: $offline_check_count"
         jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         
         # Update offline start time if transitioning to offline
-        if [ "$previous_node_online" = true ]; then
+        if [ "$previous_node_online" = "true" ]; then
             jq --arg time "$timestamp" '.offline_start_time = $time' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         fi
+
+        # Reset LAG-related counters
+        reset_lag_counters
     else
         # Reset offline check count if node is back online
         offline_check_count=0
@@ -275,7 +294,7 @@ main() {
         jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         
         # Send email if node has come back online
-        if [ "$previous_node_online" = false ]; then
+        if [ "$previous_node_online" = "false" ]; then
             # Reset sent alert count
             sent_alert_count=0
             jq --argjson count "$sent_alert_count" '.sent_alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
@@ -294,6 +313,23 @@ main() {
             
             # Update online start time
             jq --arg time "$timestamp" '.online_start_time = $time' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+        fi
+
+        # Check if node's block height exceeds the majority lag threshold
+        if [ "$local_height" != "unknown" ]; then
+            if [[ "$local_height" =~ ^[0-9]+$ ]] && [[ "$mbh" =~ ^[0-9]+$ ]]; then
+                local block_lag=$((mbh - local_height))
+                if (( block_lag > MAJORITY_LAG_THRESH )); then
+                    consecutive_lag_checks=$((consecutive_lag_checks + 1))
+                    log_message "Node Lag Detected - Consecutive Lag Checks: $consecutive_lag_checks"
+                    jq --argjson count "$consecutive_lag_checks" '.consecutive_lag_checks = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+                else
+                    consecutive_lag_checks=0
+                    jq --argjson count "$consecutive_lag_checks" '.consecutive_lag_checks = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+                fi
+            else
+                log_message "Invalid block height values for comparison: mbh=$mbh, local_height=$local_height"
+            fi
         fi
     fi
 
