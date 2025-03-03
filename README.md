@@ -1,11 +1,10 @@
-
 # Pocketnet Node Monitoring Script
 
 ## by Pewejekubam -- a Pocketnet node operator
 
 ## Overview
 
-This script monitors Pocketnet nodes and sends alerts via email when certain conditions are met. It retrieves seed node IP addresses, checks block heights, and determines the majority block height (MBH). The script can also send test emails to verify email configuration.
+This script monitors Pocketnet nodes and sends alerts via email when certain conditions are met. It retrieves seed node IP addresses, checks block heights, and determines the majority block height (MBH). The script can also send test emails to verify email configuration. Additionally, it logs the duration the node was offline in a human-readable format and includes this information in the email alert when the node transitions back online.
 
 ## Prerequisites
 
@@ -78,7 +77,7 @@ probe_nodes_conf.json
 
 ## Logging
 
-Logs are stored in the probe_nodes.log file within the CONFIG_DIR directory. Logs include timestamps, IP addresses, block heights, and any errors encountered during execution.
+Logs are stored in the probe_nodes.log file within the CONFIG_DIR directory. Logs include timestamps, IP addresses, block heights, and any errors encountered during execution. The script also logs the duration the node was offline in a human-readable format when it transitions back online.
 
 ## Error Handling
 
