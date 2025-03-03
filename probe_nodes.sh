@@ -46,7 +46,7 @@ EMAIL_TESTING=$(jq -r '.EMAIL_TESTING' "$CONFIG_FILE")
 
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
-    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0}' > "$RUNTIME_FILE"
+    echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": ""}' > "$RUNTIME_FILE"
 fi
 
 # Function to check if a required parameter is missing
@@ -240,6 +240,7 @@ main() {
     local offline_check_count=$(jq -r '.offline_check_count' "$RUNTIME_FILE")
     local previous_node_online=$(jq -r '.previous_node_online' "$RUNTIME_FILE")
     local sent_alert_count=$(jq -r '.sent_alert_count' "$RUNTIME_FILE")
+    local online_start_time=$(jq -r '.online_start_time' "$RUNTIME_FILE")
 
     # Increment offline check count if node is offline
     if [ "$node_online" = false ]; then
@@ -254,10 +255,21 @@ main() {
         
         # Send email if node has come back online
         if [ "$previous_node_online" = false ]; then
+            # Reset sent alert count
+            sent_alert_count=0
+            jq --argjson count "$sent_alert_count" '.sent_alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+            
             local subject="Pocketnet Node Status - Node is back ONLINE"
             local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
             send_email "$subject" "$body"
             log_message "Email Sent: $subject"
+            
+            # Log the time the node was offline
+            local offline_duration=$(( $(date +%s) - $(date -d "$online_start_time" +%s) ))
+            log_message "Node was offline for $offline_duration seconds"
+            
+            # Update online start time
+            jq --arg time "$timestamp" '.online_start_time = $time' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         fi
     fi
 
