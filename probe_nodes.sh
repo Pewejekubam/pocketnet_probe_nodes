@@ -148,7 +148,6 @@ determine_mbh() {
 send_email() {
     local subject=$1
     local body=$2
-    local hostname=$(hostname)
     local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
     
     if [ -n "$MSMTP_USER" ]; then
@@ -177,13 +176,10 @@ reset_lag_counters() {
 
 # Main function to run the script
 main() {
-    local hostname=$(hostname)
-
     # Check if email testing is enabled
     if [ "$EMAIL_TESTING" = "true" ]; then
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
-        log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
         log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
         send_email "$subject" "$body"
         exit 0
@@ -196,13 +192,9 @@ main() {
     if [ ${#seed_node_ips[@]} -eq 0 ]; then
         # Log the message
         log_message "No seed nodes retrieved. The seed IPs array is empty."
-        log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
         send_email "Seed Node Retrieval Alert" "No seed nodes retrieved. The seed IPs array is empty."
-
-        # Decide whether to exit or continue
-        # exit 1
     fi
 
     # Initialize frequency map
@@ -241,7 +233,6 @@ main() {
     local peer_count=$(echo "$peer_info" | jq -r 'length')
 
     # Log local node information
-    log_message "ip: localhost block_height: $local_height"
     log_message "ip: localhost block_height: $local_height"
 
     # Check on-chain condition
@@ -283,6 +274,13 @@ main() {
     local offline_start_time=$(jq -r '.offline_start_time' "$RUNTIME_FILE")
     local consecutive_lag_checks=$(jq -r '.consecutive_lag_checks' "$RUNTIME_FILE")
 
+    # Normalize the previous_node_online value after reading it
+    if [ "$previous_node_online" = "true" ]; then
+        previous_node_online="true"
+    else
+        previous_node_online="false"
+    fi
+
     # Increment offline check count if node is offline
     if [ "$node_online" = "false" ]; then
         offline_check_count=$((offline_check_count + 1))
@@ -292,6 +290,12 @@ main() {
         # Update offline start time if transitioning to offline
         if [ "$previous_node_online" = "true" ]; then
             jq --arg time "$timestamp" '.offline_start_time = $time' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+            
+            # Send email notification for online-to-offline transition
+            local subject="Pocketnet Node Status - Node is OFFLINE"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
+            send_email "$subject" "$body"
+            log_message "Email Sent: $subject"
         fi
 
         # Reset LAG-related counters
@@ -299,7 +303,7 @@ main() {
     else
         # Reset offline check count if node is back online
         if [ "$previous_node_online" = "false" ]; then
-            offline_check_count=0
+            offline_check_count=0 
             log_message "Node Online - Resetting Offline Checks Count"
         else
             offline_check_count=0
@@ -347,7 +351,11 @@ main() {
     fi
 
     # Save the current node online status for the next run
-    jq --argjson online "$node_online" '.previous_node_online = $online' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+    if [ "$node_online" = "true" ]; then
+        jq '.previous_node_online = true' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+    else
+        jq '.previous_node_online = false' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+    fi
 
     # Send email if threshold is exceeded
     if [ "$offline_check_count" -ge "$THRESHOLD" ]; then

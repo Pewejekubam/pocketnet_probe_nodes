@@ -128,6 +128,24 @@ After confirming email functionality works, set `EMAIL_TESTING` back to `false`.
 
 ## How It Works
 
+### Runtime File Initialization
+
+If the runtime file (`probe_nodes_runtime.json`) does not exist, the script will automatically create it with the following default values:
+
+```json
+{
+  "comment": "This file is used exclusively by the script and should not be edited manually.",
+  "offline_check_count": 0,
+  "previous_node_online": true,
+  "sent_alert_count": 0,
+  "online_start_time": "",
+  "offline_start_time": "",
+  "consecutive_lag_checks": 0
+}
+```
+
+This file is used to persist runtime data between script executions, such as the node's online/offline status and alert counters.
+
 ### Majority Block Height (MBH) Calculation
 
 The script determines the network consensus by:
@@ -136,6 +154,14 @@ The script determines the network consensus by:
 2. Collecting block heights from seed nodes
 3. Collecting block heights from connected peers
 4. Finding the most frequent block height (the majority)
+
+### Seed Node Retrieval
+
+The script retrieves a list of seed node IP addresses from the URL specified in the `SEED_NODES_URL` parameter. These seed nodes are queried to collect block height information, which is used to calculate the Majority Block Height (MBH). If no seed nodes are retrieved, the script logs an error and sends an email notification.
+
+### Peer Node Monitoring
+
+In addition to seed nodes, the script queries connected peer nodes to collect block height information. This data is combined with seed node data to calculate the Majority Block Height (MBH), ensuring a more accurate representation of the network's consensus.
 
 ### LAG Detection Logic
 
@@ -161,6 +187,38 @@ The script tracks offline status by:
 2. Incrementing an offline counter for each failed check
 3. Sending an alert when the counter exceeds the configured threshold
 4. Tracking the duration of offline periods
+
+### Email Testing Mode
+
+To verify that email notifications are working correctly, set `EMAIL_TESTING` to `true` in your configuration file and run the script. The script will send a test email with the configured SMTP settings and exit without performing any other operations.
+
+Example test email content:
+```
+Subject: Test Email from Pocketnet Node
+Body:
+This is a test email from the Pocketnet node script.
+
+SMTP Host: smtp.example.com
+SMTP Port: 587
+Recipient Email: your-email@example.com
+From: node-monitor@example.com
+User: smtp-username
+TLS: true
+Auth: true
+```
+After confirming that the test email is received, set `EMAIL_TESTING` back to `false` to resume normal script operation.
+
+### Offline Duration Tracking
+
+When the node transitions from offline to online, the script calculates the duration of the offline period and includes this information in the email notification. The duration is displayed in a human-readable format (e.g., "2 Days, 3 Hours, 15 Minutes").
+
+### Counter Resets
+
+The script resets specific counters under the following conditions:
+- `offline_check_count`: Reset when the node transitions from offline to online.
+- `consecutive_lag_checks`: Reset when the node's block height catches up to the Majority Block Height (MBH).
+
+These resets ensure that the script accurately tracks the node's status and avoids redundant alerts.
 
 ## Log Files
 
@@ -216,7 +274,6 @@ sudo yum install msmtp
 ```bash
 brew install jq curl msmtp
 ```
-
 
 ## Advanced Configuration
 
