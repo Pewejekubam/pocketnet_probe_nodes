@@ -25,12 +25,9 @@ CONFIG_DIR=$(jq -r '.CONFIG_DIR' "$CONFIG_FILE")
 LOG_FILE="$CONFIG_DIR/probe_nodes.log"
 
 # Function to log messages
-# Logs a message with a timestamp to both the console and the log file.
-# Arguments:
-#   $1 - The message to log.
 log_message() {
     local message=$1
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" >> "$LOG_FILE"
 }
 
 # Continue with the rest of the configuration
@@ -55,10 +52,13 @@ if [ ! -f "$RUNTIME_FILE" ]; then
     echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": "", "offline_start_time": "", "consecutive_lag_checks": 0}' > "$RUNTIME_FILE"
 fi
 
+# Function to log messages
+log_message() {
+    local message=$1
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
+}
+
 # Function to check if a required parameter is missing
-# Validates that a specific parameter exists in the configuration file.
-# Arguments:
-#   $1 - The name of the parameter to check.
 check_required_param() {
     local param_name=$1
     if ! jq -e ". | has(\"$param_name\")" "$CONFIG_FILE" > /dev/null; then
@@ -83,19 +83,11 @@ check_required_param "MAJORITY_LAG_THRESH"
 mkdir -p "$CONFIG_DIR"
 
 # Function to get the seed IP addresses
-# Fetches a list of seed node IPs from the SEED_NODES_URL.
-# Returns:
-#   A list of IP addresses.
 get_seed_ips() {
     curl -s $SEED_NODES_URL | grep -oP '^[^:]+' 
 }
 
 # Function to get block height and version from a node with a timeout of 1 second
-# Queries a node for its block height and version with a timeout of 1 second.
-# Arguments:
-#   $1 - The IP address of the node.
-# Returns:
-#   The block height and version, or "unreachable" if the node is not reachable.
 get_node_info() {
     local node_ip=$1
     local url="http://$node_ip:38081"
@@ -111,11 +103,6 @@ get_node_info() {
 }
 
 # Function to update frequency map with block heights from nodes
-# Updates a frequency map with block heights reported by a list of nodes.
-# Arguments:
-#   $1 - The origin of the nodes (e.g., "seed_node" or "locally_connected_node").
-#   $2 - A reference to the frequency map (associative array).
-#   $3+ - A list of node IP addresses.
 update_frequency_map() {
     local origin=$1
     shift
@@ -140,11 +127,6 @@ update_frequency_map() {
 }
 
 # Function to determine the Majority Block Height (MBH)
-# Determines the block height with the highest frequency in the frequency map.
-# Arguments:
-#   $1 - A reference to the frequency map (associative array).
-# Returns:
-#   The majority block height (MBH).
 determine_mbh() {
     local -n freq_map=$1
     local max_count=0
@@ -162,100 +144,8 @@ determine_mbh() {
     echo "$mbh"
 }
 
-# Embedded JSON for subject line templates
-SUBJECT_TEMPLATES=$(cat <<EOF
-{
-    "offline": "OFFLINE | Peers: {peer_count}",
-    "online": "ONLINE | Synced, Peers: {peer_count}",
-    "lag": "LAG | {block_lag} blocks behind MBH",
-    "seed_failure": "ALERT | No seed nodes found",
-    "threshold": "THRESHOLD | Offline checks: {offline_check_count}"
-}
-EOF
-)
-
-# Function to get subject line from template
-# Generates an email subject line based on a template and variable substitutions.
-# Arguments:
-#   $1 - The template key (e.g., "offline", "online").
-#   $2+ - Key-value pairs for variable substitutions (e.g., "peer_count=5").
-# Returns:
-#   The generated subject line.
-get_subject_line() {
-    local template_key=$1
-    local template=$(echo "$SUBJECT_TEMPLATES" | jq -r ".${template_key}")
-    shift
-    for var in "$@"; do
-        local key=$(echo "$var" | cut -d= -f1)
-        local value=$(echo "$var" | cut -d= -f2-)
-        template=${template//\{$key\}/$value}
-    done
-    echo "$template"
-}
-
-# Centralized function to handle email notifications
-# Sends an email notification with a given subject and body.
-# Arguments:
-#   $1 - The type of notification (e.g., "offline", "online").
-#   $2 - The body of the email.
-#   $3+ - Key-value pairs for subject line substitutions.
-send_notification() {
-    local type=$1
-    shift
-    local body=$1
-    shift
-    local subject=$(get_subject_line "$type" "$@")
-    if [ -z "$subject" ] || [ -z "$body" ]; then
-        log_message "Error: Missing subject or body for email notification of type '$type'."
-        return 1
-    fi
-    send_email "$subject" "$body"
-    log_message "Email Sent: $subject"
-}
-
-# Function to detect state changes
-detect_state_change() {
-    local current_state=$1
-    local previous_state=$2
-    if [ "$current_state" != "$previous_state" ]; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
-
-# State Management Module
-state_read() {
-    local key=$1
-    jq -r ".${key}" "$RUNTIME_FILE"
-}
-
-state_update() {
-    local key=$1
-    local value=$2
-    jq --argjson val "$value" ".${key} = \$val" "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
-}
-
-state_reset() {
-    local key=$1
-    jq ".${key} = 0" "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
-}
-
-# Email Notification Module
-send_email_notification() {
-    local type=$1
-    local body=$2
-    local subject=$(get_subject_line "$type" "$@")
-    if [ -z "$subject" ] || [ -z "$body" ]; then
-        log_message "Error: Missing subject or body for email notification of type '$type'."
-        return 1
-    fi
-    _send_email "$subject" "$body"
-    log_message "Email Sent: $subject"
-}
-
-# Private helper function for sending emails
-_send_email() {
+# Function to send email
+send_email() {
     local subject=$1
     local body=$2
     local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
@@ -279,32 +169,9 @@ _send_email() {
     echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
-# Node Monitoring Module
-check_node_status() {
-    local node_ip=$1
-    local node_info=$(get_node_info "$node_ip")
-    if [[ "$node_info" != "unreachable" ]]; then
-        local block_height=$(echo "$node_info" | awk '{print $1}')
-        local version=$(echo "$node_info" | awk '{print $2}')
-        echo "$block_height $version"
-    else
-        echo "unreachable"
-    fi
-}
-
-update_node_frequencies() {
-    local origin=$1
-    shift
-    local -n freq_map=$1
-    shift
-    local node_ips=("$@")
-    for node_ip in "${node_ips[@]}"; do
-        local node_info=$(check_node_status "$node_ip")
-        if [[ "$node_info" != "unreachable" ]]; then
-            local block_height=$(echo "$node_info" | awk '{print $1}')
-            ((freq_map[$block_height]++))
-        fi
-    done
+# Function to reset LAG-related counters
+reset_lag_counters() {
+    jq '.consecutive_lag_checks = 0' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
 }
 
 # Main function to run the script
@@ -399,13 +266,13 @@ main() {
         fi
     fi
 
-    # Read runtime variables using state_read
-    local offline_check_count=$(state_read offline_check_count)
-    local previous_node_online=$(state_read previous_node_online)
-    local sent_alert_count=$(state_read sent_alert_count)
-    local online_start_time=$(state_read online_start_time)
-    local offline_start_time=$(state_read offline_start_time)
-    local consecutive_lag_checks=$(state_read consecutive_lag_checks)
+    # Read the current runtime data
+    local offline_check_count=$(jq -r '.offline_check_count' "$RUNTIME_FILE")
+    local previous_node_online=$(jq -r '.previous_node_online' "$RUNTIME_FILE")
+    local sent_alert_count=$(jq -r '.sent_alert_count' "$RUNTIME_FILE")
+    local online_start_time=$(jq -r '.online_start_time' "$RUNTIME_FILE")
+    local offline_start_time=$(jq -r '.offline_start_time' "$RUNTIME_FILE")
+    local consecutive_lag_checks=$(jq -r '.consecutive_lag_checks' "$RUNTIME_FILE")
 
     # Normalize the previous_node_online value after reading it
     if [ "$previous_node_online" = "true" ]; then
@@ -418,49 +285,51 @@ main() {
     if [ "$node_online" = "false" ]; then
         offline_check_count=$((offline_check_count + 1))
         log_message "Node Offline - Consecutive Offline Checks: $offline_check_count"
-        state_update offline_check_count "$offline_check_count"
-
+        jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+        
         # Update offline start time if transitioning to offline
         if [ "$previous_node_online" = "true" ]; then
-            state_update offline_start_time "\"$timestamp\""
-
+            jq --arg time "$timestamp" '.offline_start_time = $time' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+            
             # Send email notification for online-to-offline transition
-            send_notification "offline" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
-                "peer_count=$peer_count"
+            local subject="Pocketnet Node Status - Node is OFFLINE"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
+            send_email "$subject" "$body"
+            log_message "Email Sent: $subject"
         fi
 
         # Reset LAG-related counters
-        state_reset consecutive_lag_checks
+        reset_lag_counters
     else
         # Reset offline check count if node is back online
         if [ "$previous_node_online" = "false" ]; then
-            offline_check_count=0
+            offline_check_count=0 
             log_message "Node Online - Resetting Offline Checks Count"
         else
             offline_check_count=0
         fi
-        state_update offline_check_count "$offline_check_count"
-
+        jq --argjson count "$offline_check_count" '.offline_check_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+        
         # Send email if node has come back online
         if [ "$previous_node_online" = "false" ]; then
             # Reset sent alert count
             sent_alert_count=0
-            state_update sent_alert_count "$sent_alert_count"
-
+            jq --argjson count "$sent_alert_count" '.sent_alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+            
             # Calculate offline duration
             local offline_duration_seconds=$(( $(date +%s) - $(date -d "$offline_start_time" +%s) ))
             local offline_duration=$(printf '%d Days, %d Hours, %d Minutes' $((offline_duration_seconds/86400)) $(( (offline_duration_seconds%86400)/3600 )) $(( (offline_duration_seconds%3600)/60 )))
-
-            send_notification "online" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Duration: $offline_duration" \
-                "peer_count=$peer_count"
-
+            
+            local subject="Pocketnet Node Status - Node is back ONLINE"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count\nOffline Duration: $offline_duration"
+            send_email "$subject" "$body"
+            log_message "Email Sent: $subject"
+            
             # Log the human-readable offline duration
             log_message "Node was offline for $offline_duration"
-
+            
             # Update online start time
-            state_update online_start_time "\"$timestamp\""
+            jq --arg time "$timestamp" '.online_start_time = $time' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         fi
 
         # Check if node's block height exceeds the majority lag threshold
@@ -470,10 +339,10 @@ main() {
                 if (( block_lag > MAJORITY_LAG_THRESH )); then
                     consecutive_lag_checks=$((consecutive_lag_checks + 1))
                     log_message "Node Lag Detected - Consecutive Lag Checks: $consecutive_lag_checks"
-                    state_update consecutive_lag_checks "$consecutive_lag_checks"
+                    jq --argjson count "$consecutive_lag_checks" '.consecutive_lag_checks = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
                 else
                     consecutive_lag_checks=0
-                    state_reset consecutive_lag_checks
+                    jq --argjson count "$consecutive_lag_checks" '.consecutive_lag_checks = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
                 fi
             else
                 log_message "Invalid block height values for comparison: mbh=$mbh, local_height=$local_height"
@@ -483,60 +352,27 @@ main() {
 
     # Save the current node online status for the next run
     if [ "$node_online" = "true" ]; then
-        state_update previous_node_online true
+        jq '.previous_node_online = true' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
     else
-        state_update previous_node_online false
+        jq '.previous_node_online = false' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
     fi
 
     # Send email if threshold is exceeded
     if [ "$offline_check_count" -ge "$THRESHOLD" ]; then
         if [ "$sent_alert_count" -lt "$MAX_ALERTS" ]; then
-            send_notification "threshold" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
-                "offline_check_count=$offline_check_count"
+            local subject="Pocketnet Node Status - Node Online: $node_online / On-Chain: $on_chain"
+            local body="Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
+            if [ "$sent_alert_count" -eq "$((MAX_ALERTS - 1))" ]; then
+                body="$body\n\nAlert Limit Reached - No More Alerts Will Be Sent"
+            fi
+            send_email "$subject" "$body"
+            log_message "Alert Sent - Current Alert Count: $sent_alert_count"
             sent_alert_count=$((sent_alert_count + 1))
-            state_update sent_alert_count "$sent_alert_count"
+            jq --argjson count "$sent_alert_count" '.sent_alert_count = $count' "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
         fi
-    fi
-
-    # Detect state changes
-    local state_changed=$(detect_state_change "$node_online" "$previous_node_online")
-
-    # Handle state change notifications
-    if [ "$state_changed" = "true" ]; then
-        if [ "$node_online" = "false" ]; then
-            send_notification "offline" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
-                "peer_count=$peer_count"
-        elif [ "$node_online" = "true" ]; then
-            local offline_duration_seconds=$(( $(date +%s) - $(date -d "$offline_start_time" +%s) ))
-            local offline_duration=$(printf '%d Days, %d Hours, %d Minutes' $((offline_duration_seconds/86400)) $(( (offline_duration_seconds%86400)/3600 )) $(( (offline_duration_seconds%3600)/60 )))
-            send_notification "online" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Duration: $offline_duration" \
-                "peer_count=$peer_count"
-        fi
-    fi
-
-    # Handle lag detection
-    if [ "$node_online" = "true" ] && (( block_lag > MAJORITY_LAG_THRESH )); then
-        send_notification "lag" \
-            "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nNode Lag Behind Majority Block Height: $block_lag blocks" \
-            "block_lag=$block_lag"
-    fi
-
-    # Handle seed node retrieval failure
-    if [ ${#seed_node_ips[@]} -eq 0 ]; then
-        send_notification "seed_failure" \
-            "Timestamp: $timestamp\nNo seed nodes retrieved. The seed IPs array is empty."
-    fi
-
-    # Handle threshold exceeded
-    if [ "$offline_check_count" -ge "$THRESHOLD" ] && [ "$sent_alert_count" -lt "$MAX_ALERTS" ]; then
-        send_notification "threshold" \
-            "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
-            "offline_check_count=$offline_check_count"
     fi
 }
 
 # Run the main function
 main
+

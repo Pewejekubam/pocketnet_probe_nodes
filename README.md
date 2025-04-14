@@ -7,7 +7,8 @@ A robust monitoring script for Pocketnet blockchain nodes that tracks node statu
 - **Network Consensus Monitoring**: Calculates the Majority Block Height (MBH) across the network
 - **LAG Detection**: Alerts when your node falls behind the network consensus
 - **Node Status Tracking**: Monitors when your node goes offline or comes back online
-- **Email Notifications**: Sends alerts when issues are detected
+- **Email Notifications (Optional)**: Sends alerts when issues are detected
+- **Logging-Only Mode**: Operates without email notifications if email settings are left blank
 - **Runtime Statistics**: Maintains statistics between script executions
 - **Configurable Thresholds**: Customize alert sensitivity based on your needs
 
@@ -17,7 +18,7 @@ A robust monitoring script for Pocketnet blockchain nodes that tracks node statu
 - Bash shell
 - `jq` (JSON processor)
 - `curl` (HTTP client)
-- `msmtp` (SMTP client for email notifications)
+- `msmtp` (SMTP client for email notifications, optional)
 
 ## Installation
 
@@ -69,6 +70,44 @@ Edit `probe_nodes_conf.json` with your specific settings:
   "MAJORITY_LAG_THRESH": 300
 }
 ```
+
+### Logging-Only Mode
+
+The script can operate in a logging-only mode if email notifications are not required. To enable this mode:
+
+1. Leave the `SMTP_HOST`, `RECIPIENT_EMAIL`, and `MSMTP_FROM` fields blank in the configuration file.
+2. Ensure `EMAIL_TESTING` is set to `false`.
+
+In this mode, the script will log all activity to the log file specified in the `CONFIG_DIR` but will not send any email alerts. This is useful for users who only need monitoring and logging without email notifications.
+
+### Email Notifications (Optional)
+
+If you wish to enable email notifications, configure the following fields in `probe_nodes_conf.json`:
+
+- `SMTP_HOST`: SMTP server hostname
+- `SMTP_PORT`: SMTP server port
+- `RECIPIENT_EMAIL`: Email address to receive alerts
+- `MSMTP_FROM`: Sender email address
+- `EMAIL_TESTING`: Set to `true` to test email functionality
+
+If these fields are not configured, the script will default to logging-only mode.
+
+### Example Configuration for Logging-Only Mode
+
+```json
+{
+  "CONFIG_DIR": "/path/to/config/directory",
+  "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
+  "SMTP_HOST": "",
+  "SMTP_PORT": "",
+  "RECIPIENT_EMAIL": "",
+  "MSMTP_FROM": "",
+  "EMAIL_TESTING": false,
+  "MAJORITY_LAG_THRESH": 300
+}
+```
+
+In this configuration, the script will only log activity and not send any email alerts.
 
 ### Configuration Parameters
 
