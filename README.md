@@ -390,15 +390,15 @@ To prevent log files from growing indefinitely, you can set up log rotation usin
 2. **Create the logrotate configuration file**:
    Run the following command to create a logrotate configuration file for the script logs:
    ```bash
-   sudo tee /etc/logrotate.d/probe_nodes >/dev/null <<EOF
-   $(pwd)/*.log {
-       daily
-       rotate 7
-       compress
-       missingok
-       notifempty
-   }
-   EOF
+sudo tee /etc/logrotate.d/probe_nodes >/dev/null <<EOF
+$(pwd)/*.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+EOF
    ```
 
 3. **Verify the setup**:
