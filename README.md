@@ -2,6 +2,24 @@
 
 A robust monitoring script for Pocketnet blockchain nodes that tracks node status, block height, and detects when your node is lagging behind the network's majority block height.
 
+## Table of Contents
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [How It Works](#how-it-works)
+  - [Runtime State Management](#runtime-state-management)
+  - [Dynamic Subject Lines](#dynamic-subject-lines)
+  - [Seed Node Retrieval Failure Handling](#seed-node-retrieval-failure-handling)
+  - [Lag Detection Logic](#lag-detection-logic)
+- [Troubleshooting](#troubleshooting)
+- [Dependencies Installation](#dependencies-installation)
+- [Advanced Configuration](#advanced-configuration)
+- [Setting Up Log Rotation](#setting-up-log-rotation)
+- [License](#license)
+- [Contributing](#contributing)
+
 ## Features
 
 - **Network Consensus Monitoring**: Calculates the Majority Block Height (MBH) across the network
@@ -166,6 +184,33 @@ Set `EMAIL_TESTING` to `true` in your configuration file and run the script. It 
 After confirming email functionality works, set `EMAIL_TESTING` back to `false`.
 
 ## How It Works
+
+### Runtime State Management
+
+The script uses a runtime file (`probe_nodes_runtime.json`) to persist state between executions. This file tracks:
+- Offline/online status
+- Consecutive offline checks
+- Consecutive lag checks
+- Alert counters
+
+These values are reset or updated based on the node's current status, ensuring accurate monitoring and avoiding redundant alerts.
+
+### Dynamic Subject Lines
+
+The script dynamically generates email subject lines based on templates. For example:
+- "OFFLINE | Peers: 5"
+- "LAG | 300 blocks behind MBH"
+- "ALERT | No seed nodes found"
+
+These subject lines provide a quick summary of the issue being reported.
+
+### Seed Node Retrieval Failure Handling
+
+If no seed nodes are retrieved from the configured `SEED_NODES_URL`, the script logs an error and sends an email notification. This ensures you are alerted to potential network or configuration issues.
+
+### Lag Detection Logic
+
+The script tracks consecutive lag checks using the `consecutive_lag_checks` counter. This helps avoid false positives by requiring the lag condition to persist across multiple checks before sending an alert.
 
 ### Runtime File Initialization
 
@@ -332,6 +377,40 @@ To avoid alert fatigue:
 1. Set `MAX_ALERTS` to limit consecutive alerts
 2. Adjust the cron schedule to run less frequently
 3. Increase `THRESHOLD` to require more consecutive failures
+
+## Setting Up Log Rotation
+
+To prevent log files from growing indefinitely, you can set up log rotation using the following steps:
+
+1. **Navigate to the `CONFIG_DIR`**:
+   ```bash
+   cd /path/to/CONFIG_DIR
+   ```
+
+2. **Create the logrotate configuration file**:
+   Run the following command to create a logrotate configuration file for the script logs:
+   ```bash
+   sudo tee /etc/logrotate.d/probe_nodes >/dev/null <<EOF
+   $(pwd)/*.log {
+       daily
+       rotate 7
+       compress
+       missingok
+       notifempty
+   }
+   EOF
+   ```
+
+3. **Verify the setup**:
+   Test the logrotate configuration to ensure it works correctly:
+   ```bash
+   sudo logrotate -d /etc/logrotate.d/probe_nodes
+   ```
+
+   This command will simulate the log rotation process and display the actions it would take without making any changes.
+
+4. **One-time setup**:
+   Once configured, log rotation will happen automatically. Logs will be rotated daily, kept for 7 days, and compressed to save space. No further action is required.
 
 ## License
 

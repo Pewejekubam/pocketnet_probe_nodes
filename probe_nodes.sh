@@ -20,8 +20,18 @@ if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
     exit 1
 fi
 
+# Function to get a configuration value from the JSON file
+# Arguments:
+#   $1 - The key to retrieve from the configuration file.
+# Returns:
+#   The value associated with the key.
+get_config_value() {
+    local key=$1
+    jq -r ".${key}" "$CONFIG_FILE"
+}
+
 # Read configuration parameters from JSON file
-CONFIG_DIR=$(jq -r '.CONFIG_DIR' "$CONFIG_FILE")
+CONFIG_DIR=$(get_config_value "CONFIG_DIR")
 LOG_FILE="$CONFIG_DIR/probe_nodes.log"
 
 # Function to log messages
@@ -35,49 +45,48 @@ log_message() {
 
 # Continue with the rest of the configuration
 RUNTIME_FILE="$CONFIG_DIR/probe_nodes_runtime.json"
-SEED_NODES_URL=$(jq -r '.SEED_NODES_URL' "$CONFIG_FILE")
-MAX_ALERTS=$(jq -r '.MAX_ALERTS' "$CONFIG_FILE")
-THRESHOLD=$(jq -r '.THRESHOLD' "$CONFIG_FILE")
-POCKETCOIN_CLI_ARGS=$(jq -r '.POCKETCOIN_CLI_ARGS' "$CONFIG_FILE")
-SMTP_HOST=$(jq -r '.SMTP_HOST' "$CONFIG_FILE")
-SMTP_PORT=$(jq -r '.SMTP_PORT' "$CONFIG_FILE")
-RECIPIENT_EMAIL=$(jq -r '.RECIPIENT_EMAIL' "$CONFIG_FILE")
-MSMTP_FROM=$(jq -r '.MSMTP_FROM' "$CONFIG_FILE")
-MSMTP_USER=$(jq -r '.MSMTP_USER' "$CONFIG_FILE")
-MSMTP_PASSWORD=$(jq -r '.MSMTP_PASSWORD' "$CONFIG_FILE")
-MSMTP_TLS=$(jq -r '.MSMTP_TLS' "$CONFIG_FILE")
-MSMTP_AUTH=$(jq -r '.MSMTP_AUTH' "$CONFIG_FILE")
-EMAIL_TESTING=$(jq -r '.EMAIL_TESTING' "$CONFIG_FILE")
-MAJORITY_LAG_THRESH=$(jq -r '.MAJORITY_LAG_THRESH' "$CONFIG_FILE")
+SEED_NODES_URL=$(get_config_value "SEED_NODES_URL")
+MAX_ALERTS=$(get_config_value "MAX_ALERTS")
+THRESHOLD=$(get_config_value "THRESHOLD")
+POCKETCOIN_CLI_ARGS=$(get_config_value "POCKETCOIN_CLI_ARGS")
+SMTP_HOST=$(get_config_value "SMTP_HOST")
+SMTP_PORT=$(get_config_value "SMTP_PORT")
+RECIPIENT_EMAIL=$(get_config_value "RECIPIENT_EMAIL")
+MSMTP_FROM=$(get_config_value "MSMTP_FROM")
+MSMTP_USER=$(get_config_value "MSMTP_USER")
+MSMTP_PASSWORD=$(get_config_value "MSMTP_PASSWORD")
+MSMTP_TLS=$(get_config_value "MSMTP_TLS")
+MSMTP_AUTH=$(get_config_value "MSMTP_AUTH")
+EMAIL_TESTING=$(get_config_value "EMAIL_TESTING")
+MAJORITY_LAG_THRESH=$(get_config_value "MAJORITY_LAG_THRESH")
 
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
     echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": "", "offline_start_time": "", "consecutive_lag_checks": 0}' > "$RUNTIME_FILE"
 fi
 
-# Function to check if a required parameter is missing
-# Validates that a specific parameter exists in the configuration file.
+# Function to validate JSON keys
 # Arguments:
-#   $1 - The name of the parameter to check.
-check_required_param() {
-    local param_name=$1
-    if ! jq -e ". | has(\"$param_name\")" "$CONFIG_FILE" > /dev/null; then
-        log_message "Missing required parameter in configuration file: $param_name"
+#   $1 - The key to check in the configuration file.
+validate_config_key() {
+    local key=$1
+    if ! jq -e ". | has(\"$key\")" "$CONFIG_FILE" > /dev/null; then
+        log_message "Missing required parameter in configuration file: $key"
         exit 1
     fi
 }
 
 # Check required parameters
-check_required_param "CONFIG_DIR"
-check_required_param "SEED_NODES_URL"
-check_required_param "MAX_ALERTS"
-check_required_param "THRESHOLD"
-check_required_param "POCKETCOIN_CLI_ARGS"
-check_required_param "SMTP_HOST"
-check_required_param "SMTP_PORT"
-check_required_param "RECIPIENT_EMAIL"
-check_required_param "MSMTP_FROM"
-check_required_param "MAJORITY_LAG_THRESH"
+validate_config_key "CONFIG_DIR"
+validate_config_key "SEED_NODES_URL"
+validate_config_key "MAX_ALERTS"
+validate_config_key "THRESHOLD"
+validate_config_key "POCKETCOIN_CLI_ARGS"
+validate_config_key "SMTP_HOST"
+validate_config_key "SMTP_PORT"
+validate_config_key "RECIPIENT_EMAIL"
+validate_config_key "MSMTP_FROM"
+validate_config_key "MAJORITY_LAG_THRESH"
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
@@ -191,6 +200,35 @@ get_subject_line() {
         template=${template//\{$key\}/$value}
     done
     echo "$template"
+}
+
+# Centralized function to send emails
+# Sends an email with the specified subject and body using msmtp.
+# Arguments:
+#   $1 - The subject of the email.
+#   $2 - The body of the email.
+send_email() {
+    local subject=$1
+    local body=$2
+    local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
+
+    if [ -n "$MSMTP_USER" ]; then
+        msmtp_command="$msmtp_command --user=$MSMTP_USER"
+    fi
+
+    if [ -n "$MSMTP_PASSWORD" ]; then
+        msmtp_command="$msmtp_command --passwordeval='echo $MSMTP_PASSWORD'"
+    fi
+
+    if [ "$MSMTP_TLS" = "true" ]; then
+        msmtp_command="$msmtp_command --tls"
+    fi
+
+    if [ "$MSMTP_AUTH" = "true" ]; then
+        msmtp_command="$msmtp_command --auth=on"
+    fi
+
+    echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
 # Centralized function to handle email notifications
@@ -307,6 +345,45 @@ update_node_frequencies() {
     done
 }
 
+# Function to calculate duration in human-readable format
+# Arguments:
+#   $1 - Start timestamp.
+#   $2 - End timestamp.
+# Returns:
+#   Duration in "X Days, Y Hours, Z Minutes" format.
+calculate_duration() {
+    local start_time=$1
+    local end_time=$2
+    local duration_seconds=$((end_time - start_time))
+    printf '%d Days, %d Hours, %d Minutes' \
+        $((duration_seconds / 86400)) \
+        $(((duration_seconds % 86400) / 3600)) \
+        $(((duration_seconds % 3600) / 60))
+}
+
+# Function to check if a node's block height is lagging
+# Arguments:
+#   $1 - Local block height.
+#   $2 - Majority block height.
+#   $3 - Lag threshold.
+# Returns:
+#   "true" if lagging, "false" otherwise.
+is_lagging() {
+    local local_height=$1
+    local mbh=$2
+    local threshold=$3
+    if [[ "$local_height" =~ ^[0-9]+$ ]] && [[ "$mbh" =~ ^[0-9]+$ ]]; then
+        local block_lag=$((mbh - local_height))
+        if ((block_lag > threshold)); then
+            echo "true"
+        else
+            echo "false"
+        fi
+    else
+        echo "false"
+    fi
+}
+
 # Main function to run the script
 main() {
     # Check if email testing is enabled
@@ -314,7 +391,7 @@ main() {
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
         log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
-        send_email "$subject" "$body"
+        send_notification "test" "$body"
         exit 0
     fi
 
@@ -327,7 +404,7 @@ main() {
         log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
-        send_email "Seed Node Retrieval Alert" "No seed nodes retrieved. The seed IPs array is empty."
+        send_notification "seed_failure" "No seed nodes retrieved. The seed IPs array is empty."
     fi
 
     # Initialize frequency map
@@ -449,8 +526,7 @@ main() {
             state_update sent_alert_count "$sent_alert_count"
 
             # Calculate offline duration
-            local offline_duration_seconds=$(( $(date +%s) - $(date -d "$offline_start_time" +%s) ))
-            local offline_duration=$(printf '%d Days, %d Hours, %d Minutes' $((offline_duration_seconds/86400)) $(( (offline_duration_seconds%86400)/3600 )) $(( (offline_duration_seconds%3600)/60 )))
+            local offline_duration=$(calculate_duration "$(date -d "$offline_start_time" +%s)" "$(date +%s)")
 
             send_notification "online" \
                 "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Duration: $offline_duration" \
@@ -466,8 +542,7 @@ main() {
         # Check if node's block height exceeds the majority lag threshold
         if [ "$local_height" != "unknown" ]; then
             if [[ "$local_height" =~ ^[0-9]+$ ]] && [[ "$mbh" =~ ^[0-9]+$ ]]; then
-                local block_lag=$((mbh - local_height))
-                if (( block_lag > MAJORITY_LAG_THRESH )); then
+                if [ "$(is_lagging "$local_height" "$mbh" "$MAJORITY_LAG_THRESH")" = "true" ]; then
                     consecutive_lag_checks=$((consecutive_lag_checks + 1))
                     log_message "Node Lag Detected - Consecutive Lag Checks: $consecutive_lag_checks"
                     state_update consecutive_lag_checks "$consecutive_lag_checks"
@@ -509,8 +584,7 @@ main() {
                 "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
                 "peer_count=$peer_count"
         elif [ "$node_online" = "true" ]; then
-            local offline_duration_seconds=$(( $(date +%s) - $(date -d "$offline_start_time" +%s) ))
-            local offline_duration=$(printf '%d Days, %d Hours, %d Minutes' $((offline_duration_seconds/86400)) $(( (offline_duration_seconds%86400)/3600 )) $(( (offline_duration_seconds%3600)/60 )))
+            local offline_duration=$(calculate_duration "$(date -d "$offline_start_time" +%s)" "$(date +%s)")
             send_notification "online" \
                 "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Duration: $offline_duration" \
                 "peer_count=$peer_count"
