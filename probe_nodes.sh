@@ -1,5 +1,5 @@
 #!/bin/bash
-## 202504150637CDT
+## 20250415154607CDT
 
 # MIT License
 
@@ -175,6 +175,8 @@ determine_mbh() {
 send_notification() {
     local type=$1
     local body=$2
+    local offline_check_count=$3
+    local peer_count=$4
     local subject=""
 
     case "$type" in
@@ -236,7 +238,10 @@ send_email() {
     fi
 
     if [ -n "$MSMTP_PASSWORD" ]; then
-        msmtp_command="$msmtp_command --passwordeval='echo $MSMTP_PASSWORD'"
+        # Escape the password to handle special characters safely
+        local escaped_password
+        escaped_password=$(printf '%q' "$MSMTP_PASSWORD")
+        msmtp_command="$msmtp_command --passwordeval='echo $escaped_password'"
     fi
 
     if [ "$MSMTP_TLS" = "true" ]; then
@@ -250,17 +255,6 @@ send_email() {
     echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
-# Function to detect state changes
-detect_state_change() {
-    local current_state=$1
-    local previous_state=$2
-    if [ "$current_state" != "$previous_state" ]; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
-
 # State Management Module
 state_read() {
     local key=$1
@@ -271,132 +265,6 @@ state_update() {
     local key=$1
     local value=$2
     jq --argjson val "$value" ".${key} = \$val" "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
-}
-
-state_reset() {
-    local key=$1
-    jq ".${key} = 0" "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
-}
-
-# Email Notification Module
-send_email_notification() {
-    local type=$1
-    local body=$2
-    local subject=$(get_subject_line "$type" "$@")
-    if [ -z "$subject" ] || [ -z "$body" ]; then
-        log_message "Error: Missing subject or body for email notification of type '$type'."
-        return 1
-    fi
-    _send_email "$subject" "$body"
-    log_message "Email Sent: $subject"
-}
-
-# Node Monitoring Module
-check_node_status() {
-    local node_ip=$1
-    local node_info=$(get_node_info "$node_ip")
-    if [[ "$node_info" != "unreachable" ]]; then
-        local block_height=$(echo "$node_info" | awk '{print $1}')
-        local version=$(echo "$node_info" | awk '{print $2}')
-        echo "$block_height $version"
-    else
-        echo "unreachable"
-    fi
-}
-
-update_node_frequencies() {
-    local origin=$1
-    shift
-    local -n freq_map=$1
-    shift
-    local node_ips=("$@")
-    for node_ip in "${node_ips[@]}"; do
-        local node_info=$(check_node_status "$node_ip")
-        if [[ "$node_info" != "unreachable" ]]; then
-            local block_height=$(echo "$node_info" | awk '{print $1}')
-            ((freq_map[$block_height]++))
-        fi
-    done
-}
-
-# Function to calculate duration in human-readable format
-# Arguments:
-#   $1 - Start timestamp.
-#   $2 - End timestamp.
-# Returns:
-#   Duration in "X Days, Y Hours, Z Minutes" format.
-calculate_duration() {
-    local start_time=$1
-    local end_time=$2
-    local duration_seconds=$((end_time - start_time))
-    printf '%d Days, %d Hours, %d Minutes' \
-        $((duration_seconds / 86400)) \
-        $(((duration_seconds % 86400) / 3600)) \
-        $(((duration_seconds % 3600) / 60))
-}
-
-# Function to check if a node's block height is lagging
-# Arguments:
-#   $1 - Local block height.
-#   $2 - Majority block height.
-#   $3 - Lag threshold.
-# Returns:
-#   "true" if lagging, "false" otherwise.
-is_lagging() {
-    local local_height=$1
-    local mbh=$2
-    local threshold=$3
-    if [[ "$local_height" =~ ^[0-9]+$ ]] && [[ "$mbh" =~ ^[0-9]+$ ]]; then
-        local block_lag=$((mbh - local_height))
-        if ((block_lag > threshold)); then
-            echo "true"
-        else
-            echo "false"
-        fi
-    else
-        echo "false"
-    fi
-}
-
-# Function to construct subject lines for email notifications
-# Arguments:
-#   $1 - The type of notification (e.g., "offline", "online").
-#   $2+ - Key-value pairs for subject line substitutions.
-get_subject_line() {
-    local type=$1
-    shift
-    local subject=""
-
-    case "$type" in
-        "offline")
-            subject="Node Offline Alert"
-            ;;
-        "online")
-            subject="Node Online Notification"
-            ;;
-        "test")
-            subject="Test Email from Pocketnet Node"
-            ;;
-        "seed_failure")
-            subject="Seed Node Retrieval Failure"
-            ;;
-        "threshold")
-            subject="Offline Threshold Exceeded"
-            ;;
-        *)
-            log_message "Error: Unknown notification type '$type'."
-            return 1
-            ;;
-    esac
-
-    # Append additional key-value pairs to the subject
-    while [ $# -gt 0 ]; do
-        local key_value=$1
-        subject="$subject | $key_value"
-        shift
-    done
-
-    echo "$subject"
 }
 
 # Main function to run the script
@@ -505,11 +373,8 @@ main() {
         previous_node_online="false"
     fi
 
-    # Detect state changes
-    local state_changed=$(detect_state_change "$node_online" "$previous_node_online")
-
     # Handle state change notifications
-    if [ "$state_changed" = "true" ]; then
+    if [ "$previous_node_online" != "$node_online" ]; then
         if [ "$node_online" = "false" ]; then
             # Transition to offline
             offline_check_count=$((offline_check_count + 1))
@@ -517,18 +382,17 @@ main() {
             state_update offline_start_time "\"$timestamp\""
 
             send_notification "offline" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
+                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
+                "$offline_check_count" "$peer_count"
         elif [ "$node_online" = "true" ]; then
             # Transition to online
             offline_check_count=0
             state_update offline_check_count "$offline_check_count"
             state_update online_start_time "\"$timestamp\""
 
-            # Calculate offline duration
-            local offline_duration=$(calculate_duration "$(date -d "$offline_start_time" +%s)" "$(date +%s)")
-
             send_notification "online" \
-                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Duration: $offline_duration"
+                "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count" \
+                "$offline_check_count" "$peer_count"
 
             # Reset sent_alert_count when transitioning back online
             sent_alert_count=0
@@ -537,12 +401,13 @@ main() {
     fi
 
     # Handle offline notifications when no state change occurs
-    if [ "$state_changed" != "true" ] && [ "$node_online" = "false" ]; then
+    if [ "$previous_node_online" = "false" ] && [ "$node_online" = "false" ]; then
         offline_check_count=$((offline_check_count + 1))
         state_update offline_check_count "$offline_check_count"
 
         send_notification "offline" \
-            "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count"
+            "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
+            "$offline_check_count" "$peer_count"
     fi
 
     # Validate critical data before sending notifications
@@ -557,11 +422,11 @@ main() {
     log_message "Sent Alert Count: $sent_alert_count"
 
     # Handle threshold exceeded (only if no state change occurred)
-    if [ "$state_changed" != "true" ] && [ "$offline_check_count" -ge "$THRESHOLD" ]; then
+    if [ "$previous_node_online" = "false" ] && [ "$offline_check_count" -ge "$THRESHOLD" ]; then
         if [ "$sent_alert_count" -lt "$MAX_ALERTS" ]; then
             send_notification "threshold" \
                 "Timestamp: $timestamp\nLocal Node Block Height: $local_height\nMajority Block Height: $mbh\nOn-Chain: $on_chain\nNode Online: $node_online\nPeer Count: $peer_count\nOffline Check Count: $offline_check_count" \
-                "offline_check_count=$offline_check_count"
+                "offline_check_count=$offline_check_count" "$peer_count"
             sent_alert_count=$((sent_alert_count + 1))
             state_update sent_alert_count "$sent_alert_count"
         fi
