@@ -250,26 +250,6 @@ send_email() {
     echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
-# Centralized function to handle email notifications
-# Sends an email notification with a given subject and body.
-# Arguments:
-#   $1 - The type of notification (e.g., "offline", "online").
-#   $2 - The body of the email.
-#   $3+ - Key-value pairs for subject line substitutions.
-send_notification() {
-    local type=$1
-    shift
-    local body=$1
-    shift
-    local subject=$(get_subject_line "$type" "$@")
-    if [ -z "$subject" ] || [ -z "$body" ]; then
-        log_message "Error: Missing subject or body for email notification of type '$type'."
-        return 1
-    fi
-    send_email "$subject" "$body"
-    log_message "Email Sent: $subject"
-}
-
 # Function to detect state changes
 detect_state_change() {
     local current_state=$1
@@ -309,31 +289,6 @@ send_email_notification() {
     fi
     _send_email "$subject" "$body"
     log_message "Email Sent: $subject"
-}
-
-# Private helper function for sending emails
-_send_email() {
-    local subject=$1
-    local body=$2
-    local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
-    
-    if [ -n "$MSMTP_USER" ]; then
-        msmtp_command="$msmtp_command --user=$MSMTP_USER"
-    fi
-    
-    if [ -n "$MSMTP_PASSWORD" ]; then
-        msmtp_command="$msmtp_command --passwordeval='echo $MSMTP_PASSWORD'"
-    fi
-    
-    if [ "$MSMTP_TLS" = "true" ]; then
-        msmtp_command="$msmtp_command --tls"
-    fi
-    
-    if [ "$MSMTP_AUTH" = "true" ]; then
-        msmtp_command="$msmtp_command --auth=on"
-    fi
-    
-    echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
 }
 
 # Node Monitoring Module
