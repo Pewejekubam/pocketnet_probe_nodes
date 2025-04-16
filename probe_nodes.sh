@@ -1,6 +1,6 @@
 #!/bin/bash
 ## 20250415160409CDT
-## v0.6.2
+## v0.6.6
 # MIT License
 
 # Read configuration parameters from JSON file
@@ -26,12 +26,26 @@ fi
 #   The value associated with the key.
 get_config_value() {
     local key=$1
-    jq -r ".${key}" "$CONFIG_FILE"
+    local value
+    value=$(jq -r ".${key}" "$CONFIG_FILE")
+    if [ "$value" == "null" ]; then
+        log_message "Error: Missing required parameter in configuration file: $key"
+        exit 1
+    fi
+    echo "$value"
 }
 
 # Read configuration parameters from JSON file
 CONFIG_DIR=$(get_config_value "CONFIG_DIR")
 LOG_FILE="$CONFIG_DIR/probe_nodes.log"
+RUNTIME_FILE="$CONFIG_DIR/probe_nodes_runtime.json"
+SEED_NODES_URL=$(get_config_value "SEED_NODES_URL")
+MAX_ALERTS=$(get_config_value "MAX_ALERTS")
+THRESHOLD=$(get_config_value "THRESHOLD")
+POCKETCOIN_CLI_ARGS=$(get_config_value "POCKETCOIN_CLI_ARGS")
+RECIPIENT_EMAIL=$(get_config_value "RECIPIENT_EMAIL")
+EMAIL_TESTING=$(get_config_value "EMAIL_TESTING")
+MAJORITY_LAG_THRESH=$(get_config_value "MAJORITY_LAG_THRESH")
 
 # Function to log messages
 # Logs a message with a timestamp to both the console and the log file.
@@ -42,49 +56,29 @@ log_message() {
     echo "$(date +"%Y-%m-%d %H:%M:%S") - $message" | tee -a "$LOG_FILE"
 }
 
-# Continue with the rest of the configuration
-RUNTIME_FILE="$CONFIG_DIR/probe_nodes_runtime.json"
-SEED_NODES_URL=$(get_config_value "SEED_NODES_URL")
-MAX_ALERTS=$(get_config_value "MAX_ALERTS")
-THRESHOLD=$(get_config_value "THRESHOLD")
-POCKETCOIN_CLI_ARGS=$(get_config_value "POCKETCOIN_CLI_ARGS")
-SMTP_HOST=$(get_config_value "SMTP_HOST")
-SMTP_PORT=$(get_config_value "SMTP_PORT")
-RECIPIENT_EMAIL=$(get_config_value "RECIPIENT_EMAIL")
-MSMTP_FROM=$(get_config_value "MSMTP_FROM")
-MSMTP_USER=$(get_config_value "MSMTP_USER")
-MSMTP_PASSWORD=$(get_config_value "MSMTP_PASSWORD")
-MSMTP_TLS=$(get_config_value "MSMTP_TLS")
-MSMTP_AUTH=$(get_config_value "MSMTP_AUTH")
-EMAIL_TESTING=$(get_config_value "EMAIL_TESTING")
-MAJORITY_LAG_THRESH=$(get_config_value "MAJORITY_LAG_THRESH")
-
 # Ensure the runtime file exists
 if [ ! -f "$RUNTIME_FILE" ]; then
     echo '{"comment": "This file is used exclusively by the script and should not be edited manually.", "offline_check_count": 0, "previous_node_online": true, "sent_alert_count": 0, "online_start_time": "", "offline_start_time": ""}' > "$RUNTIME_FILE"
 fi
 
-# Function to validate JSON keys
+# Function to validate required configuration keys
 # Arguments:
-#   $1 - The key to check in the configuration file.
-validate_config_key() {
-    local key=$1
-    if ! jq -e ". | has(\"$key\")" "$CONFIG_FILE" > /dev/null; then
-        log_message "Missing required parameter in configuration file: $key"
-        exit 1
-    fi
+#   $1 - An array of required keys.
+validate_config_keys() {
+    local -n keys=$1
+    for key in "${keys[@]}"; do
+        local value
+        value=$(jq -e ".${key}" "$CONFIG_FILE" 2>/dev/null)
+        if [ "$value" == "null" ] || [ -z "$value" ]; then
+            log_message "Missing required parameter in configuration file: $key"
+            exit 1
+        fi
+    done
 }
 
-# Check required parameters
-validate_config_key "CONFIG_DIR"
-validate_config_key "SEED_NODES_URL"
-validate_config_key "MAX_ALERTS"
-validate_config_key "THRESHOLD"
-validate_config_key "POCKETCOIN_CLI_ARGS"
-validate_config_key "RECIPIENT_EMAIL"
-validate_config_key "EMAIL_TESTING"
-validate_config_key "MAJORITY_LAG_THRESH"
-validate_config_key "CONSOLE_LOGGING"
+# Validate required configuration keys
+required_keys=("CONFIG_DIR" "SEED_NODES_URL" "MAX_ALERTS" "THRESHOLD" "POCKETCOIN_CLI_ARGS" "RECIPIENT_EMAIL" "EMAIL_TESTING" "MAJORITY_LAG_THRESH")
+validate_config_keys required_keys
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
@@ -97,20 +91,33 @@ get_seed_ips() {
     curl -s $SEED_NODES_URL | grep -oP '^[^:]+' 
 }
 
-# Function to get block height and version from a node with a timeout of 1 second
-# Queries a node for its block height and version with a timeout of 1 second.
+# Function to fetch block height and version from a node
+# Handles both local and remote nodes.
 # Arguments:
 #   $1 - The IP address of the node.
 # Returns:
 #   The block height and version, or "unreachable" if the node is not reachable.
-get_node_info() {
+fetch_node_info() {
     local node_ip=$1
+    local block_height=""
+    local version=""
     local url="http://$node_ip:38081"
+
+    if [[ "$node_ip" == "127.0.0.1" || "$node_ip" == "localhost" ]]; then
+        # Attempt to fetch block height using pocketcoin-cli for local nodes
+        if ! block_height=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getblockcount 2>/dev/null); then
+            block_height="unknown"
+        fi
+    fi
+
+    # Fallback to HTTP POST for local nodes or directly for remote nodes
     local response=$(curl -s --max-time 1 -X POST -H "Content-Type: application/json" -d '{"method": "getnodeinfo", "params": [], "id": ""}' $url 2>/dev/null)
-    local block_height=$(echo $response | jq -r '.result.lastblock.height' 2>/dev/null)
-    local version=$(echo $response | jq -r '.result.version' 2>/dev/null)
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-    if [ -n "$block_height" ]; then
+    if [[ "$block_height" == "unknown" || -z "$block_height" ]]; then
+        block_height=$(echo $response | jq -r '.result.lastblock.height' 2>/dev/null)
+    fi
+    version=$(echo $response | jq -r '.result.version' 2>/dev/null)
+
+    if [[ -n "$block_height" && "$block_height" != "null" ]]; then
         echo "$block_height $version"
     else
         echo "unreachable"
@@ -131,7 +138,7 @@ update_frequency_map() {
     local node_ips=("$@")
     local log_messages=()
     for node_ip in "${node_ips[@]}"; do
-        local node_info=$(get_node_info "$node_ip" "$origin")
+        local node_info=$(fetch_node_info "$node_ip" "$origin")
         if [[ "$node_info" != "unreachable" ]]; then
             local block_height=$(echo "$node_info" | awk '{print $1}')
             local version=$(echo "$node_info" | awk '{print $2}')
@@ -186,26 +193,9 @@ validate_msmtprc() {
     return 0
 }
 
-# Function to validate required configuration keys
-# Arguments:
-#   $1 - An array of required keys.
-validate_config_keys() {
-    local -n keys=$1
-    for key in "${keys[@]}"; do
-        if ! jq -e ". | has(\"$key\")" "$CONFIG_FILE" > /dev/null; then
-            log_message "Missing required parameter in configuration file: $key"
-            exit 1
-        fi
-    done
-}
-
 # Validate the .msmtprc file
 validate_msmtprc
 EMAIL_ENABLED=$?
-
-# Validate required configuration keys
-required_keys=("CONFIG_DIR" "SEED_NODES_URL" "MAX_ALERTS" "THRESHOLD" "POCKETCOIN_CLI_ARGS" "RECIPIENT_EMAIL" "EMAIL_TESTING" "MAJORITY_LAG_THRESH" "CONSOLE_LOGGING")
-validate_config_keys required_keys
 
 # Function to send email notifications
 # Dynamically construct subject lines based on the current state and context.
@@ -339,23 +329,27 @@ main() {
     # Determine the Majority Block Height (MBH)
     mbh=$(determine_mbh frequency_map)
 
-    # Get local node block height
-    local local_height
+    # Fetch local node information
+    local local_node_info=$(fetch_node_info "localhost")
+    local local_height=$(echo "$local_node_info" | awk '{print $1}')
     local node_online="true"
-    if ! local_height=$(pocketcoin-cli $POCKETCOIN_CLI_ARGS getblockcount 2>/dev/null); then
+    if [[ "$local_node_info" == "unreachable" ]]; then
         node_online="false"
         local_height="unknown"
-    else
-        local response=$(curl -s --max-time 1 -X POST -H "Content-Type: application/json" -d '{"method": "getnodeinfo", "params": [], "id": ""}' http://localhost:38081 2>/dev/null)
-        local_height=$(echo $response | jq -r '.result.lastblock.height' 2>/dev/null)
     fi
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-
-    # Get peer count
-    local peer_count=$(echo "$peer_info" | jq -r 'length')
 
     # Log local node information
     log_message "ip: localhost block_height: $local_height"
+
+    # Fetch remote node information
+    seed_node_ips=($(get_seed_ips))
+    for node_ip in "${seed_node_ips[@]}"; do
+        local remote_node_info=$(fetch_node_info "$node_ip")
+        log_message "ip: $node_ip info: $remote_node_info"
+    done
+
+    # Get peer count
+    local peer_count=$(echo "$peer_info" | jq -r 'length')
 
     # Check on-chain condition
     local on_chain="false"
