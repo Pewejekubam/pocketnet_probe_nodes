@@ -1,6 +1,6 @@
 #!/bin/bash
 ## 20250415160409CDT
-
+## v0.6.2
 # MIT License
 
 # Read configuration parameters from JSON file
@@ -81,11 +81,10 @@ validate_config_key "SEED_NODES_URL"
 validate_config_key "MAX_ALERTS"
 validate_config_key "THRESHOLD"
 validate_config_key "POCKETCOIN_CLI_ARGS"
-validate_config_key "SMTP_HOST"
-validate_config_key "SMTP_PORT"
 validate_config_key "RECIPIENT_EMAIL"
-validate_config_key "MSMTP_FROM"
+validate_config_key "EMAIL_TESTING"
 validate_config_key "MAJORITY_LAG_THRESH"
+validate_config_key "CONSOLE_LOGGING"
 
 # Create the necessary directories if they don't exist
 mkdir -p "$CONFIG_DIR"
@@ -170,6 +169,18 @@ determine_mbh() {
     echo "$mbh"
 }
 
+# Path to the msmtprc file
+MSMTPRC_FILE="$HOME/.msmtprc"
+
+# Verify the existence and validity of the msmtprc file
+if [ ! -f "$MSMTPRC_FILE" ]; then
+    log_message "Warning: .msmtprc file not found. Running in log-only mode."
+else
+    if ! grep -q "^account" "$MSMTPRC_FILE"; then
+        log_message "Error: Invalid .msmtprc file. Missing 'account' configuration. Running in log-only mode."
+    fi
+fi
+
 # Function to send email notifications
 # Dynamically construct subject lines based on the current state and context.
 send_notification() {
@@ -231,28 +242,15 @@ send_notification() {
 send_email() {
     local subject=$1
     local body=$2
-    local msmtp_command="msmtp --host=$SMTP_HOST --port=$SMTP_PORT --from=$MSMTP_FROM --logfile=/dev/stdout"
-
-    if [ -n "$MSMTP_USER" ]; then
-        msmtp_command="$msmtp_command --user=$MSMTP_USER"
+    # Extract the 'from' address from the .msmtprc file
+    local from_address
+    from_address=$(grep -m 1 "^from[[:space:]]" "$MSMTPRC_FILE" | awk '{print $2}')
+    if [ -z "$from_address" ]; then
+        log_message "Error: Unable to extract 'from' address from .msmtprc. Email not sent."
+        return 1
     fi
-
-    if [ -n "$MSMTP_PASSWORD" ]; then
-        # Escape the password to handle special characters safely
-        local escaped_password
-        escaped_password=$(printf '%q' "$MSMTP_PASSWORD")
-        msmtp_command="$msmtp_command --passwordeval='echo $escaped_password'"
-    fi
-
-    if [ "$MSMTP_TLS" = "true" ]; then
-        msmtp_command="$msmtp_command --tls"
-    fi
-
-    if [ "$MSMTP_AUTH" = "true" ]; then
-        msmtp_command="$msmtp_command --auth=on"
-    fi
-
-    echo -e "From: $MSMTP_FROM\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | $msmtp_command "$RECIPIENT_EMAIL"
+    # Construct the email with an explicit 'From:' header
+    echo -e "From: $from_address\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | msmtp --logfile=/dev/stdout "$RECIPIENT_EMAIL"
 }
 
 # State Management Module

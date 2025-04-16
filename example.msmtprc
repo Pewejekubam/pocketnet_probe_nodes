@@ -1,0 +1,16 @@
+# Example .msmtprc file for MSMTP configuration
+# Place this file in your home directory as ~/.msmtprc
+# Ensure it has 600 permissions: chmod 600 ~/.msmtprc
+
+defaults
+auth           on
+tls            on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+logfile        ~/.msmtp.log
+
+account default
+host           smtp.example.com
+port           587
+from           node@example.com
+user           your_email@example.com
+password       your_password

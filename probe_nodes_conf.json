@@ -4,14 +4,8 @@
     "MAX_ALERTS": 3,
     "THRESHOLD": 3,
     "POCKETCOIN_CLI_ARGS": "",
-    "SMTP_HOST": "smtp.example.com",
-    "SMTP_PORT": 587,
     "RECIPIENT_EMAIL": "alert@example.com",
-    "MSMTP_FROM": "node@example.com",
-    "MSMTP_USER": "your_email@example.com",
-    "MSMTP_PASSWORD": "your_password",
-    "MSMTP_TLS": true,
-    "MSMTP_AUTH": false,
     "EMAIL_TESTING": false,
-    "MAJORITY_LAG_THRESH": 300
+    "MAJORITY_LAG_THRESH": 300,
+    "CONSOLE_LOGGING": true
 }
