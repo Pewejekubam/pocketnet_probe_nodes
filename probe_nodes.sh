@@ -172,14 +172,40 @@ determine_mbh() {
 # Path to the msmtprc file
 MSMTPRC_FILE="$HOME/.msmtprc"
 
-# Verify the existence and validity of the msmtprc file
-if [ ! -f "$MSMTPRC_FILE" ]; then
-    log_message "Warning: .msmtprc file not found. Running in log-only mode."
-else
+# Function to validate the .msmtprc file
+# Checks if the file exists and contains valid configurations.
+validate_msmtprc() {
+    if [ ! -f "$MSMTPRC_FILE" ]; then
+        log_message "Warning: .msmtprc file not found. Running in log-only mode."
+        return 1
+    fi
     if ! grep -q "^account" "$MSMTPRC_FILE"; then
         log_message "Error: Invalid .msmtprc file. Missing 'account' configuration. Running in log-only mode."
+        return 1
     fi
-fi
+    return 0
+}
+
+# Function to validate required configuration keys
+# Arguments:
+#   $1 - An array of required keys.
+validate_config_keys() {
+    local -n keys=$1
+    for key in "${keys[@]}"; do
+        if ! jq -e ". | has(\"$key\")" "$CONFIG_FILE" > /dev/null; then
+            log_message "Missing required parameter in configuration file: $key"
+            exit 1
+        fi
+    done
+}
+
+# Validate the .msmtprc file
+validate_msmtprc
+EMAIL_ENABLED=$?
+
+# Validate required configuration keys
+required_keys=("CONFIG_DIR" "SEED_NODES_URL" "MAX_ALERTS" "THRESHOLD" "POCKETCOIN_CLI_ARGS" "RECIPIENT_EMAIL" "EMAIL_TESTING" "MAJORITY_LAG_THRESH" "CONSOLE_LOGGING")
+validate_config_keys required_keys
 
 # Function to send email notifications
 # Dynamically construct subject lines based on the current state and context.
@@ -240,6 +266,11 @@ send_notification() {
 #   $1 - The subject of the email.
 #   $2 - The body of the email.
 send_email() {
+    if [ "$EMAIL_ENABLED" -ne 0 ]; then
+        log_message "Email not sent. Running in log-only mode."
+        return 0
+    fi
+
     local subject=$1
     local body=$2
     # Extract the 'from' address from the .msmtprc file
