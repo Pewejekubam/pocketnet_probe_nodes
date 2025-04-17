@@ -1,6 +1,6 @@
 #!/bin/bash
 ## 20250415160409CDT
-## v0.6.7
+## v0.7.1
 # MIT License
 
 # Read configuration parameters from JSON file
