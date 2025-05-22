@@ -1,5 +1,5 @@
 {
-    "CONFIG_DIR": "/home/pocketnet/probe_nodes",
+    "CONFIG_DIR": "/home/pocketnet/pocketnet_probe_nodes",
     "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
     "MAX_ALERTS": 3,
     "THRESHOLD": 3,

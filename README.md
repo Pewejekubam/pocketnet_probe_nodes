@@ -2,6 +2,8 @@
 
 A robust monitoring script for Pocketnet blockchain nodes that tracks node status, block height, and detects when your node is lagging behind the network's majority block height.
 
+**Version**: `v0.7.1`
+
 ## Table of Contents
 - [Features](#features)
 - [Requirements](#requirements)
@@ -13,6 +15,8 @@ A robust monitoring script for Pocketnet blockchain nodes that tracks node statu
   - [Dynamic Subject Lines](#dynamic-subject-lines)
   - [Seed Node Retrieval Failure Handling](#seed-node-retrieval-failure-handling)
   - [Lag Detection Logic](#lag-detection-logic)
+- [Email Configuration](#email-configuration)
+  - [Using `.msmtprc` for Email Notifications](#using-msmtprc-for-email-notifications)
 - [Troubleshooting](#troubleshooting)
 - [Dependencies Installation](#dependencies-installation)
 - [Advanced Configuration](#advanced-configuration)
@@ -22,35 +26,35 @@ A robust monitoring script for Pocketnet blockchain nodes that tracks node statu
 
 ## Features
 
-- **Network Consensus Monitoring**: Calculates the Majority Block Height (MBH) across the network
-- **LAG Detection**: Alerts when your node falls behind the network consensus
-- **Node Status Tracking**: Monitors when your node goes offline or comes back online
-- **Email Notifications (Optional)**: Sends alerts when issues are detected
-- **Logging-Only Mode**: Operates without email notifications if email settings are left blank
-- **Runtime Statistics**: Maintains statistics between script executions
-- **Configurable Thresholds**: Customize alert sensitivity based on your needs
+- **Network Consensus Monitoring**: Calculates the Majority Block Height (MBH) across the network.
+- **LAG Detection**: Alerts when your node falls behind the network consensus.
+- **Node Status Tracking**: Monitors when your node goes offline or comes back online.
+- **Email Notifications (Optional)**: Sends alerts when issues are detected.
+- **Logging-Only Mode**: Operates without email notifications if `.msmtprc` is not configured.
+- **Runtime Statistics**: Maintains statistics between script executions.
+- **Configurable Thresholds**: Customize alert sensitivity based on your needs.
 
 ## Requirements
 
-- A running Pocketnet node
-- Bash shell
-- `jq` (JSON processor)
-- `curl` (HTTP client)
-- `msmtp` (SMTP client for email notifications, optional)
+- A running Pocketnet node.
+- Bash shell.
+- `jq` (JSON processor).
+- `curl` (HTTP client).
+- `msmtp` (SMTP client for email notifications, optional).
 
 ## Installation
 
 1. Clone this repository or download the script:
 
 ```bash
-git clone https://github.com/yourusername/pocketnet-node-monitor.git
-cd pocketnet-node-monitor
+git clone https://github.com/Pewejekubam/pocketnet_probe_nodes.git
+cd pocketnet_probe_nodes
 ```
 
 2. Make the script executable:
 
 ```bash
-chmod +x probe_nodes-08.sh
+chmod +x pocketnet_probe_nodes.sh
 ```
 
 3. Create the configuration file (`probe_nodes_conf.json`):
@@ -79,11 +83,6 @@ Edit `probe_nodes_conf.json` with your specific settings:
   "SMTP_HOST": "smtp.example.com",
   "SMTP_PORT": 587,
   "RECIPIENT_EMAIL": "your-email@example.com",
-  "MSMTP_FROM": "node-monitor@example.com",
-  "MSMTP_USER": "smtp-username",
-  "MSMTP_PASSWORD": "smtp-password",
-  "MSMTP_TLS": "true",
-  "MSMTP_AUTH": "true",
   "EMAIL_TESTING": "false",
   "MAJORITY_LAG_THRESH": 300
 }
@@ -91,61 +90,49 @@ Edit `probe_nodes_conf.json` with your specific settings:
 
 ### Logging-Only Mode
 
-The script can operate in a logging-only mode if email notifications are not required. To enable this mode:
+The script can operate in a logging-only mode if email notifications are not required. To enable this mode do not configure a `~/.msmtprc` file
+In this mode, the script will log all activity to the log file specified in the `CONFIG_DIR` but will not send any email alerts.
 
-1. Leave the `SMTP_HOST`, `RECIPIENT_EMAIL`, and `MSMTP_FROM` fields blank in the configuration file.
-2. Ensure `EMAIL_TESTING` is set to `false`.
+## Email Configuration
 
-In this mode, the script will log all activity to the log file specified in the `CONFIG_DIR` but will not send any email alerts. This is useful for users who only need monitoring and logging without email notifications.
+### Using `.msmtprc` for Email Notifications
 
-### Email Notifications (Optional)
+To enable email notifications, you must configure the `.msmtprc` file in your home directory. This file is used by `msmtp` to send emails.
 
-If you wish to enable email notifications, configure the following fields in `probe_nodes_conf.json`:
+1. **Create the `.msmtprc` file**:
 
-- `SMTP_HOST`: SMTP server hostname
-- `SMTP_PORT`: SMTP server port
-- `RECIPIENT_EMAIL`: Email address to receive alerts
-- `MSMTP_FROM`: Sender email address
-- `EMAIL_TESTING`: Set to `true` to test email functionality
-
-If these fields are not configured, the script will default to logging-only mode.
-
-### Example Configuration for Logging-Only Mode
-
-```json
-{
-  "CONFIG_DIR": "/path/to/config/directory",
-  "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
-  "SMTP_HOST": "",
-  "SMTP_PORT": "",
-  "RECIPIENT_EMAIL": "",
-  "MSMTP_FROM": "",
-  "EMAIL_TESTING": false,
-  "MAJORITY_LAG_THRESH": 300
-}
+```bash
+nano ~/.msmtprc
 ```
 
-In this configuration, the script will only log activity and not send any email alerts.
+2. **Add the following configuration**:
 
-### Configuration Parameters
+```plaintext
+# Example .msmtprc configuration
+account default
+host smtp.example.com
+port 587
+from node-monitor@example.com
+auth on
+user smtp-username
+password smtp-password
+tls on
+logfile ~/probe_nodes/msmtp.log
+```
 
-| Parameter | Description |
-|-----------|-------------|
-| `CONFIG_DIR` | Directory to store runtime data and logs |
-| `SEED_NODES_URL` | URL to retrieve seed node IP addresses |
-| `MAX_ALERTS` | Maximum number of consecutive alerts to send |
-| `THRESHOLD` | Number of consecutive offline checks before alerting |
-| `POCKETCOIN_CLI_ARGS` | Arguments to pass to pocketcoin-cli |
-| `SMTP_HOST` | SMTP server hostname |
-| `SMTP_PORT` | SMTP server port |
-| `RECIPIENT_EMAIL` | Email address to receive alerts |
-| `MSMTP_FROM` | Sender email address |
-| `MSMTP_USER` | SMTP username (optional) |
-| `MSMTP_PASSWORD` | SMTP password (optional) |
-| `MSMTP_TLS` | Use TLS for SMTP connection ("true" or "false") |
-| `MSMTP_AUTH` | Use authentication for SMTP connection ("true" or "false") |
-| `EMAIL_TESTING` | Enable email testing mode ("true" or "false") |
-| `MAJORITY_LAG_THRESH` | Maximum allowed block difference from majority height |
+3. **Set the correct permissions**:
+
+```bash
+chmod 600 ~/.msmtprc
+```
+
+4. **Verify the configuration**:
+
+Run the following command to test the email setup:
+
+```bash
+echo "Test email body" | msmtp --debug --from=node-monitor@example.com -t your-email@example.com
+```
 
 ## Usage
 
@@ -170,7 +157,7 @@ crontab -e
 2. Add an entry to run the script every 15 minutes:
 
 ```
-*/15 * * * * /path/to/probe_nodes-08.sh > /dev/null 2>&1
+*/15 * * * * /path/to/probe_nodes.sh > /dev/null 2>&1
 ```
 
 ### Testing Email Configuration
@@ -316,25 +303,25 @@ The script creates these files in your configured `CONFIG_DIR`:
 ### Common Issues
 
 1. **Script fails to run**:
-   - Ensure the script is executable (`chmod +x probe_nodes-08.sh`)
-   - Check that all dependencies are installed (`jq`, `curl`, `msmtp`)
+   - Ensure the script is executable (`chmod +x probe_nodes.sh`).
+   - Check that all dependencies are installed (`jq`, `curl`, `msmtp`).
 
 2. **No emails are sent**:
-   - Verify SMTP configuration
-   - Check that `msmtp` is installed and working
-   - Try the test mode by setting `EMAIL_TESTING` to `true`
+   - Verify `.msmtprc` configuration.
+   - Check that `msmtp` is installed and working.
+   - Try the test mode by setting `EMAIL_TESTING` to `true`.
 
 3. **Script reports "No seed nodes retrieved"**:
-   - Check your internet connection
-   - Verify the `SEED_NODES_URL` is correct and accessible
+   - Check your internet connection.
+   - Verify the `SEED_NODES_URL` is correct and accessible.
 
 4. **False positive LAG alerts**:
-   - Increase `MAJORITY_LAG_THRESH` to be more tolerant of small variations
-   - Check network connectivity to ensure all nodes are reachable
+   - Increase `MAJORITY_LAG_THRESH` to be more tolerant of small variations.
+   - Check network connectivity to ensure all nodes are reachable.
 
 5. **Invalid block height values**:
-   - Ensure your Pocketnet node is fully synced
-   - Check if your node's API is working properly
+   - Ensure your Pocketnet node is fully synced.
+   - Check if your node's API is working properly.
 
 ## Dependencies Installation
 
@@ -365,8 +352,8 @@ brew install jq curl msmtp
 
 The `MAJORITY_LAG_THRESH` parameter controls how sensitive the script is to your node falling behind:
 
-- **Lower values** (e.g., 3-5 blocks): More sensitive, potentially more false positives
-- **Higher values** (e.g., 200-300 blocks): Less sensitive, might miss smaller lags
+- **Lower values** (e.g., 3-5 blocks): More sensitive, potentially more false positives.
+- **Higher values** (e.g., 200-300 blocks): Less sensitive, might miss smaller lags.
 
 Choose a value appropriate for your network's block time and acceptable sync delay.
 
@@ -374,9 +361,9 @@ Choose a value appropriate for your network's block time and acceptable sync del
 
 To avoid alert fatigue:
 
-1. Set `MAX_ALERTS` to limit consecutive alerts
-2. Adjust the cron schedule to run less frequently
-3. Increase `THRESHOLD` to require more consecutive failures
+1. Set `MAX_ALERTS` to limit consecutive alerts.
+2. Adjust the cron schedule to run less frequently.
+3. Increase `THRESHOLD` to require more consecutive failures.
 
 ## Setting Up Log Rotation
 
@@ -388,10 +375,10 @@ To prevent log files from growing indefinitely, you can set up log rotation usin
    ```
 
 2. **Create the logrotate configuration file**:
-   Run the following command to create a logrotate configuration file for the script logs:
+   Run the following command from the home directory of the user to create a logrotate configuration file for the script logs:
    ```bash
 sudo tee /etc/logrotate.d/probe_nodes >/dev/null <<EOF
-$(pwd)/*.log {
+$(pwd)/probe_nodes/*.log {
     daily
     rotate 7
     compress
@@ -420,8 +407,8 @@ MIT License - See the LICENSE file for details.
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Fork the repository.
+2. Create your feature branch (`git checkout -b feature/amazing-feature`).
+3. Commit your changes (`git commit -m 'Add some amazing feature'`).
+4. Push to the branch (`git push origin feature/amazing-feature`).
+5. Open a Pull Request.
