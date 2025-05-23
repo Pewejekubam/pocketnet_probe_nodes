@@ -76,7 +76,7 @@ Edit `probe_nodes_conf.json` with your specific settings:
 ```json
 {
   "CONFIG_DIR": "/path/to/config/directory",
-  "SEED_NODES_URL": "https://raw.githubusercontent.com/pocketnetteam/pocketnet.core/76b20a013ee60d019dcfec3a4714a4e21a8b432c/contrib/seeds/nodes_main.txt",
+  "SEED_NODES_URL": "https://raw.githubusercontent.com/Pewejekubam/pocketnet_probe_nodes/refs/heads/main/APDs-node-list-20250522.txt",
   "MAX_ALERTS": 5,
   "THRESHOLD": 3,
   "POCKETCOIN_CLI_ARGS": "-datadir=/path/to/pocketcoin/data",
