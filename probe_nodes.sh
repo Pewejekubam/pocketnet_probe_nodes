@@ -164,6 +164,10 @@ determine_mbh() {
     local max_count=0
     local mbh=0
     for height in "${!freq_map[@]}"; do
+        # Validate height is a number before comparison
+        if ! is_valid_number "$height"; then
+            continue
+        fi
         if (( freq_map[$height] > max_count )); then
             max_count=${freq_map[$height]}
             mbh=$height
@@ -290,6 +294,17 @@ send_email() {
     echo -e "From: $from_address\nTo: $RECIPIENT_EMAIL\nSubject: $subject\n\n$body" | msmtp --logfile=/dev/stdout "$RECIPIENT_EMAIL"
 }
 
+# Validation Module
+# Validates that a value is a positive integer
+# Arguments:
+#   $1 - The value to validate
+# Returns:
+#   0 if valid, 1 if invalid
+is_valid_number() {
+    local value=$1
+    [[ "$value" =~ ^[0-9]+$ ]]
+}
+
 # State Management Module
 state_read() {
     local key=$1
@@ -299,7 +314,13 @@ state_read() {
 state_update() {
     local key=$1
     local value=$2
-    jq --argjson val "$value" ".${key} = \$val" "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+    local lock_file="$RUNTIME_FILE.lock"
+
+    # Use flock for atomic file operations
+    (
+        flock -x 200
+        jq --argjson val "$value" ".${key} = \$val" "$RUNTIME_FILE" > "$RUNTIME_FILE.tmp" && mv "$RUNTIME_FILE.tmp" "$RUNTIME_FILE"
+    ) 200>"$lock_file"
 }
 
 # Main function to run the script
@@ -350,6 +371,12 @@ main() {
 
     # Determine the Majority Block Height (MBH)
     mbh=$(determine_mbh frequency_map)
+
+    # Validate MBH is a valid number
+    if ! is_valid_number "$mbh" || [ "$mbh" -eq 0 ]; then
+        log_message "Error: Invalid or zero Majority Block Height calculated: $mbh"
+        exit 1
+    fi
 
     # Fetch local node information
     local local_node_info=$(fetch_node_info "localhost")
