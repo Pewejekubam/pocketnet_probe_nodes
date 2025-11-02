@@ -205,7 +205,7 @@ EMAIL_ENABLED=$?
 #   The subject and body as a string (separated by a newline).
 construct_email_content() {
     local type=$1
-    local context=$2
+    declare -A context=("${!2}") # Properly receive associative array
     local subject=""
     local body=""
 
