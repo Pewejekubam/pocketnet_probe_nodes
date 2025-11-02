@@ -1,6 +1,6 @@
 {
     "CONFIG_DIR": "/home/pocketnet/pocketnet_probe_nodes",
-    "SEED_NODES_URL": "https://raw.githubusercontent.com/Pewejekubam/pocketnet_probe_nodes/refs/heads/main/APDs-node-list-20250522.txt",
+    "SEED_NODES_URL": "https://raw.githubusercontent.com/Pewejekubam/pocketnet_probe_nodes/refs/heads/main/APDs-node-list-20251102.txt",
     "MAX_ALERTS": 3,
     "THRESHOLD": 3,
     "POCKETCOIN_CLI_ARGS": "",
