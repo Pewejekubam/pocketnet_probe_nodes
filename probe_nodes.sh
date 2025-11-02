@@ -210,7 +210,7 @@ construct_email_content() {
     local body=""
 
     case "$type" in
-        "offline")
+        "offline"|"threshold")
             subject="OFFLINE | Offline checks: ${context[offline_check_count]}"
             body="Timestamp: ${context[timestamp]}\nLocal Node Block Height: ${context[local_height]}\nMajority Block Height: ${context[mbh]}\nOn-Chain: ${context[on_chain]}\nNode Online: ${context[node_online]}\nPeer Count: ${context[peer_count]}\nOffline Check Count: ${context[offline_check_count]}"
             ;;
@@ -304,6 +304,9 @@ state_update() {
 
 # Main function to run the script
 main() {
+    # Capture timestamp at the start of execution
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+
     # Check if email testing is enabled
     if [ "$EMAIL_TESTING" = "true" ]; then
         local subject="Test Email from Pocketnet Node"
@@ -323,6 +326,9 @@ main() {
 
         # Notify the user via email
         send_notification "seed_failure" "No seed nodes retrieved. The seed IPs array is empty."
+
+        # Exit since we cannot determine MBH without seed nodes
+        exit 1
     fi
 
     # Initialize frequency map
@@ -356,13 +362,6 @@ main() {
 
     # Log local node information
     log_message "ip: localhost block_height: $local_height"
-
-    # Fetch remote node information
-    seed_node_ips=($(get_seed_ips))
-    for node_ip in "${seed_node_ips[@]}"; do
-        local remote_node_info=$(fetch_node_info "$node_ip")
-        log_message "ip: $node_ip info: $remote_node_info"
-    done
 
     # Get peer count
     local peer_count=$(echo "$peer_info" | jq -r 'length')
