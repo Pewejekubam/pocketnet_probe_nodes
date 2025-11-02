@@ -2,7 +2,7 @@
 
 A robust monitoring script for Pocketnet blockchain nodes that tracks node status, block height, and detects when your node is lagging behind the network's majority block height.
 
-**Version**: `v0.7.1`
+**Version**: `v0.8.0` (November 2025 Update)
 
 ## Table of Contents
 - [Features](#features)
@@ -31,8 +31,11 @@ A robust monitoring script for Pocketnet blockchain nodes that tracks node statu
 - **Node Status Tracking**: Monitors when your node goes offline or comes back online.
 - **Email Notifications (Optional)**: Sends alerts when issues are detected.
 - **Logging-Only Mode**: Operates without email notifications if `.msmtprc` is not configured.
-- **Runtime Statistics**: Maintains statistics between script executions.
+- **Runtime Statistics**: Maintains statistics between script executions with atomic updates.
 - **Configurable Thresholds**: Customize alert sensitivity based on your needs.
+- **Curated Node List**: Uses regularly updated list of high-performance v0.22.19 nodes.
+- **Data Validation**: Validates block heights and prevents errors from corrupt data.
+- **Test Suites**: Includes automated tests for reliability verification.
 
 ## Requirements
 
@@ -76,7 +79,7 @@ Edit `probe_nodes_conf.json` with your specific settings:
 ```json
 {
   "CONFIG_DIR": "/path/to/config/directory",
-  "SEED_NODES_URL": "https://raw.githubusercontent.com/Pewejekubam/pocketnet_probe_nodes/refs/heads/main/APDs-node-list-20250522.txt",
+  "SEED_NODES_URL": "https://raw.githubusercontent.com/Pewejekubam/pocketnet_probe_nodes/refs/heads/main/APDs-node-list-20251102.txt",
   "MAX_ALERTS": 5,
   "THRESHOLD": 3,
   "POCKETCOIN_CLI_ARGS": "-datadir=/path/to/pocketcoin/data",
@@ -291,12 +294,33 @@ The script resets specific counters under the following conditions:
 
 These resets ensure that the script accurately tracks the node's status and avoids redundant alerts.
 
+## Recent Improvements (v0.8.0 - November 2025)
+
+### Bug Fixes
+- **Email notifications**: Fixed associative array bug causing "context" to appear in emails instead of actual values
+- **Missing timestamp**: Added timestamp variable initialization preventing empty timestamps
+- **Threshold notifications**: Fixed missing "threshold" notification type
+- **Seed node handling**: Script now exits properly when no seed nodes are retrieved
+
+### Reliability Improvements
+- **Atomic state updates**: Uses `flock` to prevent race conditions during concurrent executions
+- **Numeric validation**: Validates block heights are numbers before arithmetic operations
+- **Updated node list**: Curated list of 50 high-performance v0.22.19 nodes sorted by peer count
+
+### Testing
+Run the included test suites to verify installation:
+```bash
+./test_phase1_fixes.sh  # Tests critical bug fixes
+./test_phase2_fixes.sh  # Tests reliability improvements
+```
+
 ## Log Files
 
 The script creates these files in your configured `CONFIG_DIR`:
 
 - `probe_nodes.log` - Main log file with script activity
 - `probe_nodes_runtime.json` - Runtime data persisted between executions
+- `probe_nodes_runtime.json.lock` - Lock file for atomic state updates
 
 ## Troubleshooting
 
@@ -367,37 +391,66 @@ To avoid alert fatigue:
 
 ## Setting Up Log Rotation
 
-To prevent log files from growing indefinitely, you can set up log rotation using the following steps:
+To prevent log files from growing indefinitely (they can reach 200MB+), use the included logrotate configuration.
 
-1. **Navigate to the `CONFIG_DIR`**:
+### Installation
+
+1. **Copy the configuration file**:
    ```bash
-   cd /path/to/CONFIG_DIR
+   sudo cp probe_nodes.logrotate /etc/logrotate.d/probe_nodes
+   sudo chmod 644 /etc/logrotate.d/probe_nodes
+   sudo chown root:root /etc/logrotate.d/probe_nodes
    ```
 
-2. **Create the logrotate configuration file**:
-   Run the following command from the home directory of the user to create a logrotate configuration file for the script logs:
+2. **Edit if needed**:
+   If your log file is in a non-standard location, edit the path on line 15:
    ```bash
-sudo tee /etc/logrotate.d/probe_nodes >/dev/null <<EOF
-$(pwd)/probe_nodes/*.log {
-    daily
-    rotate 7
-    compress
-    missingok
-    notifempty
-}
-EOF
+   sudo nano /etc/logrotate.d/probe_nodes
+   # Update: /home/pocketnet/probe_nodes/probe_nodes.log
+   # To your CONFIG_DIR path
    ```
 
-3. **Verify the setup**:
-   Test the logrotate configuration to ensure it works correctly:
+3. **Add the `su` directive** (required for proper permissions):
+   The config file needs to specify which user owns the logs. Add this line after the opening `{`:
+   ```
+   su pocketnet pocketnet
+   ```
+   Replace `pocketnet` with your actual username if different.
+
+4. **Verify the setup**:
    ```bash
    sudo logrotate -d /etc/logrotate.d/probe_nodes
    ```
+   This simulates rotation without making changes.
 
-   This command will simulate the log rotation process and display the actions it would take without making any changes.
+5. **Force first rotation** (optional, for testing):
+   ```bash
+   sudo logrotate -f /etc/logrotate.d/probe_nodes
+   ```
 
-4. **One-time setup**:
-   Once configured, log rotation will happen automatically. Logs will be rotated daily, kept for 7 days, and compressed to save space. No further action is required.
+### Configuration Details
+
+The included `probe_nodes.logrotate` file configures:
+- **Daily rotation**: Logs rotated once per day
+- **14 day retention**: Keeps 2 weeks of history
+- **Compression**: Old logs compressed with gzip to save space
+- **Safe rotation**: Uses `copytruncate` so script continues writing
+- **Date-based naming**: Rotated files named like `probe_nodes.log-20251102`
+
+### Troubleshooting
+
+**Permission errors**: Ensure the `su` directive matches the user running the script.
+
+**Logs not rotating**: Check if logrotate is enabled:
+```bash
+sudo systemctl status logrotate.timer
+sudo systemctl enable logrotate.timer
+```
+
+**View rotated logs**:
+```bash
+zcat probe_nodes.log-20251102.gz
+```
 
 ## License
 
