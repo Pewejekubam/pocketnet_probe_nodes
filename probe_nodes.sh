@@ -204,23 +204,37 @@ EMAIL_ENABLED=$?
 # Helper function to construct email subject and body
 # Arguments:
 #   $1 - The notification type (e.g., "offline", "online", etc.).
-#   $2 - Context data (e.g., local_height, mbh, peer_count, etc.).
+#   $2 - timestamp
+#   $3 - local_height
+#   $4 - mbh
+#   $5 - on_chain
+#   $6 - node_online
+#   $7 - peer_count
+#   $8 - offline_check_count
+#   $9 - sent_alert_count
 # Returns:
 #   The subject and body as a string (separated by a newline).
 construct_email_content() {
     local type=$1
-    declare -A context=("${!2}") # Properly receive associative array
+    local timestamp=$2
+    local local_height=$3
+    local mbh=$4
+    local on_chain=$5
+    local node_online=$6
+    local peer_count=$7
+    local offline_check_count=$8
+    local sent_alert_count=$9
     local subject=""
     local body=""
 
     case "$type" in
         "offline"|"threshold")
-            subject="OFFLINE | Offline checks: ${context[offline_check_count]}"
-            body="Timestamp: ${context[timestamp]}\nLocal Node Block Height: ${context[local_height]}\nMajority Block Height: ${context[mbh]}\nOn-Chain: ${context[on_chain]}\nNode Online: ${context[node_online]}\nPeer Count: ${context[peer_count]}\nOffline Check Count: ${context[offline_check_count]}"
+            subject="OFFLINE | Offline checks: ${offline_check_count:-0}"
+            body="Timestamp: ${timestamp:-unknown}\nLocal Node Block Height: ${local_height:-unknown}\nMajority Block Height: ${mbh:-0}\nOn-Chain: ${on_chain:-unknown}\nNode Online: ${node_online:-unknown}\nPeer Count: ${peer_count:-0}\nOffline Check Count: ${offline_check_count:-0}"
             ;;
         "online")
-            subject="ONLINE | Synced, Peers: ${context[peer_count]}"
-            body="Timestamp: ${context[timestamp]}\nLocal Node Block Height: ${context[local_height]}\nMajority Block Height: ${context[mbh]}\nOn-Chain: ${context[on_chain]}\nNode Online: ${context[node_online]}\nPeer Count: ${context[peer_count]}"
+            subject="ONLINE | Synced, Peers: ${peer_count:-0}"
+            body="Timestamp: ${timestamp:-unknown}\nLocal Node Block Height: ${local_height:-unknown}\nMajority Block Height: ${mbh:-0}\nOn-Chain: ${on_chain:-unknown}\nNode Online: ${node_online:-unknown}\nPeer Count: ${peer_count:-0}"
             ;;
         "test")
             subject="Test Email from Pocketnet Node"
@@ -241,11 +255,28 @@ construct_email_content() {
 
 # Function to send email notifications
 # Dynamically construct subject lines based on the current state and context.
+# Arguments:
+#   $1 - type (notification type)
+#   $2 - timestamp
+#   $3 - local_height
+#   $4 - mbh
+#   $5 - on_chain
+#   $6 - node_online
+#   $7 - peer_count
+#   $8 - offline_check_count
+#   $9 - sent_alert_count
 send_notification() {
     local type=$1
-    declare -A context=("${!2}") # Pass context as an associative array
+    local timestamp=$2
+    local local_height=$3
+    local mbh=$4
+    local on_chain=$5
+    local node_online=$6
+    local peer_count=$7
+    local offline_check_count=$8
+    local sent_alert_count=$9
     local email_content
-    email_content=$(construct_email_content "$type" context)
+    email_content=$(construct_email_content "$type" "$timestamp" "$local_height" "$mbh" "$on_chain" "$node_online" "$peer_count" "$offline_check_count" "$sent_alert_count")
     local subject=$(echo "$email_content" | head -n 1)
     local body=$(echo "$email_content" | tail -n +2)
 
@@ -255,7 +286,7 @@ send_notification() {
     fi
 
     # Apply MAX_ALERTS logic to all offline notifications
-    if [ "$type" = "offline" ] && [ "${context[sent_alert_count]}" -ge "$MAX_ALERTS" ]; then
+    if [ "$type" = "offline" ] && [ "${sent_alert_count:-0}" -ge "$MAX_ALERTS" ]; then
         log_message "Max alerts reached for offline notifications. No email sent."
         return 0
     fi
@@ -265,7 +296,7 @@ send_notification() {
 
     # Increment sent_alert_count for offline notifications
     if [ "$type" = "offline" ]; then
-        local new_sent_alert_count=$((context[sent_alert_count] + 1))
+        local new_sent_alert_count=$((sent_alert_count + 1))
         state_update sent_alert_count "$new_sent_alert_count"
     fi
 }
@@ -333,7 +364,7 @@ main() {
         local subject="Test Email from Pocketnet Node"
         local body="This is a test email from the Pocketnet node script.\n\nSMTP Host: $SMTP_HOST\nSMTP Port: $SMTP_PORT\nRecipient Email: $RECIPIENT_EMAIL\nFrom: $MSMTP_FROM\nUser: $MSMTP_USER\nTLS: $MSMTP_TLS\nAuth: $MSMTP_AUTH"
         log_message "EMAIL_TESTING is enabled. A test email will be sent with the following parameters:\nSubject: $subject\nBody:\n$body\n"
-        send_notification "test" "$body"
+        send_notification "test" "" "" "" "" "" "" "" ""
         exit 0
     fi
 
@@ -346,7 +377,7 @@ main() {
         log_message "No seed nodes retrieved. The seed IPs array is empty."
 
         # Notify the user via email
-        send_notification "seed_failure" "No seed nodes retrieved. The seed IPs array is empty."
+        send_notification "seed_failure" "" "" "" "" "" "" "" ""
 
         # Exit since we cannot determine MBH without seed nodes
         exit 1
@@ -372,13 +403,8 @@ main() {
     # Determine the Majority Block Height (MBH)
     mbh=$(determine_mbh frequency_map)
 
-    # Validate MBH is a valid number
-    if ! is_valid_number "$mbh" || [ "$mbh" -eq 0 ]; then
-        log_message "Error: Invalid or zero Majority Block Height calculated: $mbh"
-        exit 1
-    fi
-
-    # Fetch local node information
+    # Fetch local node information FIRST (before validating MBH)
+    # This ensures we can detect offline status even if MBH calculation fails
     local local_node_info=$(fetch_node_info "localhost")
     local local_height=$(echo "$local_node_info" | awk '{print $1}')
     local node_online="true"
@@ -389,6 +415,17 @@ main() {
 
     # Log local node information
     log_message "ip: localhost block_height: $local_height"
+
+    # Validate MBH is a valid number
+    # If local node is offline, we still want to proceed to send offline notifications
+    # even if MBH is invalid
+    if (! is_valid_number "$mbh" || [ "$mbh" -eq 0 ]) && [ "$node_online" = "true" ]; then
+        log_message "Error: Invalid or zero Majority Block Height calculated: $mbh (local node appears online)"
+        exit 1
+    elif ! is_valid_number "$mbh" || [ "$mbh" -eq 0 ]; then
+        log_message "Warning: Invalid or zero Majority Block Height calculated: $mbh (local node is offline, continuing...)"
+        mbh=0  # Set to 0 for logging purposes
+    fi
 
     # Get peer count
     local peer_count=$(echo "$peer_info" | jq -r 'length')
@@ -446,34 +483,14 @@ main() {
             state_update offline_check_count "$offline_check_count"
             state_update offline_start_time "\"$timestamp\""
 
-            declare -A context=(
-                [timestamp]="$timestamp"
-                [local_height]="$local_height"
-                [mbh]="$mbh"
-                [on_chain]="$on_chain"
-                [node_online]="$node_online"
-                [peer_count]="$peer_count"
-                [offline_check_count]="$offline_check_count"
-                [sent_alert_count]="$sent_alert_count"
-            )
-            send_notification "offline" context[@]
+            send_notification "offline" "$timestamp" "$local_height" "$mbh" "$on_chain" "$node_online" "$peer_count" "$offline_check_count" "$sent_alert_count"
         elif [ "$node_online" = "true" ]; then
             # Transition to online
             offline_check_count=0
             state_update offline_check_count "$offline_check_count"
             state_update online_start_time "\"$timestamp\""
 
-            declare -A context=(
-                [timestamp]="$timestamp"
-                [local_height]="$local_height"
-                [mbh]="$mbh"
-                [on_chain]="$on_chain"
-                [node_online]="$node_online"
-                [peer_count]="$peer_count"
-                [offline_check_count]="$offline_check_count"
-                [sent_alert_count]="$sent_alert_count"
-            )
-            send_notification "online" context[@]
+            send_notification "online" "$timestamp" "$local_height" "$mbh" "$on_chain" "$node_online" "$peer_count" "$offline_check_count" "$sent_alert_count"
 
             # Reset sent_alert_count when transitioning back online
             sent_alert_count=0
@@ -482,21 +499,10 @@ main() {
     fi
 
     # Handle offline notifications when no state change occurs
+    # Only increment the counter here; threshold notifications are handled separately below
     if [ "$previous_node_online" = "false" ] && [ "$node_online" = "false" ]; then
         offline_check_count=$((offline_check_count + 1))
         state_update offline_check_count "$offline_check_count"
-
-        declare -A context=(
-            [timestamp]="$timestamp"
-            [local_height]="$local_height"
-            [mbh]="$mbh"
-            [on_chain]="$on_chain"
-            [node_online]="$node_online"
-            [peer_count]="$peer_count"
-            [offline_check_count]="$offline_check_count"
-            [sent_alert_count]="$sent_alert_count"
-        )
-        send_notification "offline" context[@]
     fi
 
     # Validate critical data before sending notifications
@@ -513,17 +519,7 @@ main() {
     # Handle threshold exceeded (only if no state change occurred)
     if [ "$previous_node_online" = "false" ] && [ "$offline_check_count" -ge "$THRESHOLD" ]; then
         if [ "$sent_alert_count" -lt "$MAX_ALERTS" ]; then
-            declare -A context=(
-                [timestamp]="$timestamp"
-                [local_height]="$local_height"
-                [mbh]="$mbh"
-                [on_chain]="$on_chain"
-                [node_online]="$node_online"
-                [peer_count]="$peer_count"
-                [offline_check_count]="$offline_check_count"
-                [sent_alert_count]="$sent_alert_count"
-            )
-            send_notification "threshold" context[@]
+            send_notification "threshold" "$timestamp" "$local_height" "$mbh" "$on_chain" "$node_online" "$peer_count" "$offline_check_count" "$sent_alert_count"
             sent_alert_count=$((sent_alert_count + 1))
             state_update sent_alert_count "$sent_alert_count"
         fi
